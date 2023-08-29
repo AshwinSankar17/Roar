@@ -8,13 +8,13 @@ ROAR is a toolkit for Indic languages that provides a unified interface for vari
 - [x] Core NeMo Fork
 - [x] NeMo Utils Fork
 - [x] Vanilla MHA
-- [] Flash Attention
-- [] Sparse Attention
-- [] TransformerLayer
-- [] ConformerLayer
-- [] One TTS Alignment
-- [] Fastpitch
-- [] HiFi-GAN
-- [] WaveGrad
-- [] GlowTTS
-- [] FastDiff
+- [ ] Flash Attention
+- [ ] Sparse Attention
+- [ ] TransformerLayer
+- [ ] ConformerLayer
+- [ ] One TTS Alignment
+- [ ] Fastpitch
+- [ ] HiFi-GAN
+- [ ] WaveGrad
+- [ ] GlowTTS
+- [ ] FastDiff
