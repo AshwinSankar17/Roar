@@ -447,7 +447,7 @@ class ConditionalLayerNorm(torch.nn.LayerNorm):
             if conditioning is None:
                 raise ValueError(
                     """You should add additional data types as conditions (e.g. speaker id or reference audio) 
-                                 and define speaker_encoder in your config."""
+                                and define speaker_encoder in your config."""
                 )
 
             inputs = inputs * self.cond_weight(conditioning)
