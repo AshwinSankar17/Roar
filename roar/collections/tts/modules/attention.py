@@ -26,7 +26,7 @@ Config = namedtuple(
 )
 
 
-# Multi Head Self Attention
+# Multi Head Self Attention, may use flash attention or memory efficient attention
 class MultiHeadAttn(nn.Module):
     def __init__(
         self,
@@ -37,7 +37,9 @@ class MultiHeadAttn(nn.Module):
         dropatt=0.1,
         pre_lnorm=False,
         condition_types=[],
-        attention_config: Config = (False, False, True),
+        attention_config: Config = Config(
+            False, True, False
+        ),  # Enables the pytorch implementation of attention in c++
     ):
         super(MultiHeadAttn, self).__init__()
 
@@ -83,21 +85,12 @@ class MultiHeadAttn(nn.Module):
         k = head_k.permute(2, 0, 1, 3).reshape(-1, inp.size(1), d_head)
         v = head_v.permute(2, 0, 1, 3).reshape(-1, inp.size(1), d_head)
 
-        # attn_score = torch.bmm(q, k.transpose(1, 2))
-        # attn_score.mul_(self.scale)
+        if attn_mask is not None:  # prepare attention mask
+            attn_mask = attn_mask.unsqueeze(1).to(q.dtype)  # [B, 1, T]
+            attn_mask = attn_mask.repeat(n_head, attn_mask.size(2), 1)
 
-        # if attn_mask is not None:
-        #     attn_mask = attn_mask.unsqueeze(1).to(attn_score.dtype)
-        #     attn_mask = attn_mask.repeat(n_head, attn_mask.size(2), 1)
-        #     attn_score.masked_fill_(attn_mask.to(torch.bool), -float('inf'))
-
-        # attn_prob = F.softmax(attn_score, dim=2)
-        # attn_prob = self.dropatt(attn_prob)
-        # attn_vec = torch.bmm(attn_prob, v)
         with torch.backends.cuda.sdp_kernel(**self.attention_config._asdict()):
-            attn_vec = F.scaled_dot_product_attention(
-                q, k, v, self.scale, attn_mask, self.dropatt
-            )
+            attn_vec = F.scaled_dot_product_attention(q, k, v, attn_mask, self.dropatt)
 
         attn_vec = attn_vec.view(n_head, inp.size(0), inp.size(1), d_head)
         attn_vec = (
