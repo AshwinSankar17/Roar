@@ -146,3 +146,186 @@ class TransformerLayer(nn.Module, adapter_mixins.AdapterModuleMixin):
             output *= mask
 
         return output
+
+
+class FFTransformerDecoder(NeuralModule):
+    def __init__(
+        self,
+        n_layer,
+        n_head,
+        d_model,
+        d_head,
+        d_inner,
+        kernel_size,
+        dropout,
+        dropatt,
+        dropemb=0.0,
+        pre_lnorm=False,
+        condition_types=[],
+    ):
+        super(FFTransformerDecoder, self).__init__()
+        self.d_model = d_model
+        self.n_head = n_head
+        self.d_head = d_head
+
+        self.pos_emb = PositionalEmbedding(self.d_model)
+        self.drop = nn.Dropout(dropemb)
+        self.layers = nn.ModuleList()
+        self.cond_input = ConditionalInput(d_model, d_model, condition_types)
+
+        for _ in range(n_layer):
+            self.layers.append(
+                TransformerLayer(
+                    n_head,
+                    d_model,
+                    d_head,
+                    d_inner,
+                    kernel_size,
+                    dropout,
+                    dropatt=dropatt,
+                    pre_lnorm=pre_lnorm,
+                    condition_types=condition_types,
+                )
+            )
+
+    @property
+    def input_types(self):
+        return {
+            "input": NeuralType(("B", "T", "D"), EncodedRepresentation()),
+            "seq_lens": NeuralType(("B"), LengthsType()),
+            "conditioning": NeuralType(
+                ("B", "T", "D"), EncodedRepresentation(), optional=True
+            ),
+        }
+
+    @property
+    def output_types(self):
+        return {
+            "out": NeuralType(("B", "T", "D"), EncodedRepresentation()),
+            "mask": NeuralType(("B", "T", "D"), MaskType()),
+        }
+
+    @typecheck()
+    def forward(self, input, seq_lens, conditioning=None):
+        return self._forward(input, mask_from_lens(seq_lens).unsqueeze(2), conditioning)
+
+    def _forward(self, inp, mask, conditioning):
+        pos_seq = torch.arange(inp.size(1), device=inp.device).to(inp.dtype)
+        pos_emb = self.pos_emb(pos_seq) * mask
+        inp += pos_emb
+        inp = self.cond_input(inp, conditioning)
+        out = self.drop(inp)
+
+        for layer in self.layers:
+            out = layer(out, mask=mask, conditioning=conditioning)
+
+        # out = self.drop(out)
+        return out, mask
+
+
+class FFTransformerEncoder(FFTransformerDecoder):
+    def __init__(
+        self,
+        n_layer,
+        n_head,
+        d_model,
+        d_head,
+        d_inner,
+        kernel_size,
+        dropout,
+        dropatt,
+        dropemb=0.0,
+        pre_lnorm=False,
+        n_embed=None,
+        d_embed=None,
+        padding_idx=0,
+        condition_types=[],
+    ):
+        super(FFTransformerEncoder, self).__init__(
+            n_layer,
+            n_head,
+            d_model,
+            d_head,
+            d_inner,
+            kernel_size,
+            dropout,
+            dropatt,
+            dropemb,
+            pre_lnorm,
+            condition_types,
+        )
+
+        self.padding_idx = padding_idx
+        self.word_emb = nn.Embedding(
+            n_embed, d_embed or d_model, padding_idx=self.padding_idx
+        )
+
+    @property
+    def input_types(self):
+        return {
+            "input": NeuralType(("B", "T"), TokenIndex()),
+            "conditioning": NeuralType(
+                ("B", "T", "D"), EncodedRepresentation(), optional=True
+            ),
+        }
+
+    def forward(self, input, conditioning=0):
+        return self._forward(
+            self.word_emb(input), (input != self.padding_idx).unsqueeze(2), conditioning
+        )  # (B, L, 1)
+
+
+class FFTransformer(nn.Module):
+    def __init__(
+        self,
+        in_dim,
+        out_dim=1,
+        n_layers=6,
+        n_head=1,
+        d_head=64,
+        d_inner=1024,
+        kernel_size=3,
+        dropout=0.1,
+        dropatt=0.1,
+        dropemb=0.0,
+    ):
+        super(FFTransformer, self).__init__()
+        self.in_dim = in_dim
+        self.out_dim = out_dim
+        self.n_head = n_head
+        self.d_head = d_head
+
+        self.pos_emb = PositionalEmbedding(self.in_dim)
+        self.drop = nn.Dropout(dropemb)
+        self.layers = nn.ModuleList()
+
+        for _ in range(n_layers):
+            self.layers.append(
+                TransformerLayer(
+                    n_head,
+                    in_dim,
+                    d_head,
+                    d_inner,
+                    kernel_size,
+                    dropout,
+                    dropatt=dropatt,
+                )
+            )
+
+        self.dense = LinearNorm(in_dim, out_dim)
+
+    def forward(self, dec_inp, in_lens):
+        # B, C, T --> B, T, C
+        inp = dec_inp.transpose(1, 2)
+        mask = get_mask_from_lengths(in_lens)[..., None]
+
+        pos_seq = torch.arange(inp.size(1), device=inp.device).to(inp.dtype)
+        pos_emb = self.pos_emb(pos_seq) * mask
+
+        out = self.drop(inp + pos_emb)
+
+        for layer in self.layers:
+            out = layer(out, mask=mask)
+
+        out = self.dense(out).transpose(1, 2)
+        return out
