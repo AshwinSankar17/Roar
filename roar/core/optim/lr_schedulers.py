@@ -13,7 +13,11 @@ import torch.utils.data.dataloader as dataloader
 from omegaconf import DictConfig, OmegaConf
 from torch.optim.lr_scheduler import _LRScheduler
 
-from roar.core.config import SchedulerParams, get_scheduler_config, register_scheduler_params
+from roar.core.config import (
+    SchedulerParams,
+    get_scheduler_config,
+    register_scheduler_params,
+)
 from roar.utils import logging
 from roar.utils.model_utils import maybe_update_config_version
 
@@ -28,11 +32,22 @@ class WarmupPolicy(_LRScheduler):
             infinite training
     """
 
-    def __init__(self, optimizer, *, warmup_steps=None, warmup_ratio=None, max_steps=None, min_lr=0.0, last_epoch=-1):
+    def __init__(
+        self,
+        optimizer,
+        *,
+        warmup_steps=None,
+        warmup_ratio=None,
+        max_steps=None,
+        min_lr=0.0,
+        last_epoch=-1,
+    ):
         assert not (
             warmup_steps is not None and warmup_ratio is not None
         ), "Either use particular number of step or ratio"
-        assert warmup_ratio is None or max_steps is not None, "If there is a ratio, there should be a total steps"
+        assert (
+            warmup_ratio is None or max_steps is not None
+        ), "If there is a ratio, there should be a total steps"
 
         # It is necessary to assign all attributes *before* __init__,
         # as class is wrapped by an inner class.
@@ -50,7 +65,8 @@ class WarmupPolicy(_LRScheduler):
     def get_lr(self):
         if not self._get_lr_called_within_step:
             warnings.warn(
-                "To get the last learning rate computed by the scheduler, please use `get_last_lr()`.", UserWarning
+                "To get the last learning rate computed by the scheduler, please use `get_last_lr()`.",
+                UserWarning,
             )
 
         step = self.last_epoch
@@ -83,12 +99,21 @@ class SquareRootConstantPolicy(_LRScheduler):
     """
 
     def __init__(
-        self, optimizer, *, constant_steps=None, constant_ratio=None, max_steps=None, min_lr=0.0, last_epoch=-1
+        self,
+        optimizer,
+        *,
+        constant_steps=None,
+        constant_ratio=None,
+        max_steps=None,
+        min_lr=0.0,
+        last_epoch=-1,
     ):
         assert not (
             constant_steps is not None and constant_ratio is not None
         ), "Either use particular number of step or ratio"
-        assert constant_ratio is None or max_steps is not None, "If there is a ratio, there should be a total steps"
+        assert (
+            constant_ratio is None or max_steps is not None
+        ), "If there is a ratio, there should be a total steps"
 
         # It is necessary to assign all attributes *before* __init__,
         # as class is wrapped by an inner class.
@@ -100,14 +125,15 @@ class SquareRootConstantPolicy(_LRScheduler):
         else:
             self.constant_steps = 0
 
-        self.constant_lr = 1 / (constant_steps ** 0.5)
+        self.constant_lr = 1 / (constant_steps**0.5)
         self.min_lr = min_lr
         super().__init__(optimizer, last_epoch)
 
     def get_lr(self):
         if not self._get_lr_called_within_step:
             warnings.warn(
-                "To get the last learning rate computed by the scheduler, please use `get_last_lr()`.", UserWarning
+                "To get the last learning rate computed by the scheduler, please use `get_last_lr()`.",
+                UserWarning,
             )
 
         step = self.last_epoch
@@ -149,8 +175,12 @@ class WarmupHoldPolicy(WarmupPolicy):
         min_lr=0.0,
         last_epoch=-1,
     ):
-        assert not (hold_steps is not None and hold_ratio is not None), "Either use particular number of step or ratio"
-        assert hold_ratio is None or max_steps is not None, "If there is a ratio, there should be a total steps"
+        assert not (
+            hold_steps is not None and hold_ratio is not None
+        ), "Either use particular number of step or ratio"
+        assert (
+            hold_ratio is None or max_steps is not None
+        ), "If there is a ratio, there should be a total steps"
 
         self.min_lr = min_lr
         self._last_warmup_lr = 0.0
@@ -183,7 +213,9 @@ class WarmupHoldPolicy(WarmupPolicy):
     def get_lr(self):
         if not self._get_lr_called_within_step:
             warnings.warn(
-                "To get the last learning rate computed by the scheduler, " "please use `get_last_lr()`.", UserWarning
+                "To get the last learning rate computed by the scheduler, "
+                "please use `get_last_lr()`.",
+                UserWarning,
             )
 
         step = self.last_epoch
@@ -233,7 +265,9 @@ class WarmupAnnealHoldPolicy(_LRScheduler):
         assert not (
             constant_steps is not None and constant_ratio is not None
         ), "Either use constant_steps or constant_ratio"
-        assert warmup_ratio is None or max_steps is not None, "If there is a ratio, there should be a total steps"
+        assert (
+            warmup_ratio is None or max_steps is not None
+        ), "If there is a ratio, there should be a total steps"
 
         # It is necessary to assign all attributes *before* __init__,
         # as class is wrapped by an inner class.
@@ -261,7 +295,8 @@ class WarmupAnnealHoldPolicy(_LRScheduler):
     def get_lr(self):
         if not self._get_lr_called_within_step:
             warnings.warn(
-                "To get the last learning rate computed by the scheduler, please use `get_last_lr()`.", UserWarning
+                "To get the last learning rate computed by the scheduler, please use `get_last_lr()`.",
+                UserWarning,
             )
 
         step = self.last_epoch
@@ -271,7 +306,10 @@ class WarmupAnnealHoldPolicy(_LRScheduler):
             return self._get_warmup_lr(step)
 
         # Constant steps after warmup and decay
-        if self.constant_steps > 0 and (self.warmup_steps + self.decay_steps) < step <= self.max_steps:
+        if (
+            self.constant_steps > 0
+            and (self.warmup_steps + self.decay_steps) < step <= self.max_steps
+        ):
             return self._get_constant_lr(step)
 
         # Min lr after max steps of updates
@@ -312,8 +350,9 @@ def _cosine_annealing(initial_lr, step, max_steps, min_lr):
     return out_lr
 
 
-def _linear_warmup_with_cosine_annealing(max_lr, warmup_steps, step, decay_steps, min_lr):
-
+def _linear_warmup_with_cosine_annealing(
+    max_lr, warmup_steps, step, decay_steps, min_lr
+):
     assert max_lr > min_lr
     # Use linear warmup for the initial part.
     if warmup_steps > 0 and step <= warmup_steps:
@@ -348,9 +387,11 @@ def _poly_decay(initial_lr, step, decay_steps, power, min_lr, cycle):
     return lr
 
 
-def _noam_hold_annealing(initial_lr, step, warmup_steps, hold_steps, decay_rate, min_lr):
+def _noam_hold_annealing(
+    initial_lr, step, warmup_steps, hold_steps, decay_rate, min_lr
+):
     # hold_steps = total number of steps to hold the LR, not the warmup + hold steps.
-    T_warmup_decay = max(1, warmup_steps ** decay_rate)
+    T_warmup_decay = max(1, warmup_steps**decay_rate)
     T_hold_decay = max(1, (step - hold_steps) ** decay_rate)
     lr = (initial_lr * T_warmup_decay) / T_hold_decay
     lr = max(lr, min_lr)
@@ -359,7 +400,13 @@ def _noam_hold_annealing(initial_lr, step, warmup_steps, hold_steps, decay_rate,
 
 class SquareAnnealing(WarmupPolicy):
     def __init__(self, optimizer, *, max_steps, min_lr=1e-5, last_epoch=-1, **kwargs):
-        super().__init__(optimizer=optimizer, max_steps=max_steps, last_epoch=last_epoch, min_lr=min_lr, **kwargs)
+        super().__init__(
+            optimizer=optimizer,
+            max_steps=max_steps,
+            last_epoch=last_epoch,
+            min_lr=min_lr,
+            **kwargs,
+        )
 
     def _get_lr(self, step):
         new_lrs = [
@@ -376,11 +423,22 @@ class SquareAnnealing(WarmupPolicy):
 
 class SquareRootAnnealing(WarmupPolicy):
     def __init__(self, optimizer, *, max_steps, min_lr=0, last_epoch=-1, **kwargs):
-        super().__init__(optimizer=optimizer, max_steps=max_steps, last_epoch=last_epoch, min_lr=min_lr, **kwargs)
+        super().__init__(
+            optimizer=optimizer,
+            max_steps=max_steps,
+            last_epoch=last_epoch,
+            min_lr=min_lr,
+            **kwargs,
+        )
 
     def _get_lr(self, step):
         new_lrs = [
-            _squareroot_annealing(initial_lr=initial_lr, step=step, max_steps=self.max_steps, min_lr=self.min_lr)
+            _squareroot_annealing(
+                initial_lr=initial_lr,
+                step=step,
+                max_steps=self.max_steps,
+                min_lr=self.min_lr,
+            )
             for initial_lr in self.base_lrs
         ]
         return new_lrs
@@ -388,7 +446,13 @@ class SquareRootAnnealing(WarmupPolicy):
 
 class CosineAnnealing(WarmupAnnealHoldPolicy):
     def __init__(self, optimizer, *, max_steps, min_lr=0, last_epoch=-1, **kwargs):
-        super().__init__(optimizer=optimizer, max_steps=max_steps, last_epoch=last_epoch, min_lr=min_lr, **kwargs)
+        super().__init__(
+            optimizer=optimizer,
+            max_steps=max_steps,
+            last_epoch=last_epoch,
+            min_lr=min_lr,
+            **kwargs,
+        )
 
     def _get_lr(self, step):
         for initial_lr in self.base_lrs:
@@ -439,13 +503,23 @@ class CosineAnnealing(WarmupAnnealHoldPolicy):
 
 class NoamAnnealing(_LRScheduler):
     def __init__(
-        self, optimizer, *, d_model, warmup_steps=None, warmup_ratio=None, max_steps=None, min_lr=0.0, last_epoch=-1
+        self,
+        optimizer,
+        *,
+        d_model,
+        warmup_steps=None,
+        warmup_ratio=None,
+        max_steps=None,
+        min_lr=0.0,
+        last_epoch=-1,
     ):
         self._normalize = d_model ** (-0.5)
         assert not (
             warmup_steps is not None and warmup_ratio is not None
         ), "Either use particular number of step or ratio"
-        assert warmup_ratio is None or max_steps is not None, "If there is a ratio, there should be a total steps"
+        assert (
+            warmup_ratio is None or max_steps is not None
+        ), "If there is a ratio, there should be a total steps"
 
         # It is necessary to assign all attributes *before* __init__,
         # as class is wrapped by an inner class.
@@ -463,7 +537,8 @@ class NoamAnnealing(_LRScheduler):
     def get_lr(self):
         if not self._get_lr_called_within_step:
             warnings.warn(
-                "To get the last learning rate computed by the scheduler, please use `get_last_lr()`.", UserWarning
+                "To get the last learning rate computed by the scheduler, please use `get_last_lr()`.",
+                UserWarning,
             )
 
         step = max(1, self.last_epoch)
@@ -474,12 +549,17 @@ class NoamAnnealing(_LRScheduler):
                     f"{self} received an initial learning rate that was lower than the minimum learning rate."
                 )
 
-        new_lrs = [self._noam_annealing(initial_lr=initial_lr, step=step) for initial_lr in self.base_lrs]
+        new_lrs = [
+            self._noam_annealing(initial_lr=initial_lr, step=step)
+            for initial_lr in self.base_lrs
+        ]
         return new_lrs
 
     def _noam_annealing(self, initial_lr, step):
         if self.warmup_steps > 0:
-            mult = self._normalize * min(step ** (-0.5), step * (self.warmup_steps ** (-1.5)))
+            mult = self._normalize * min(
+                step ** (-0.5), step * (self.warmup_steps ** (-1.5))
+            )
         else:
             mult = self._normalize * step ** (-0.5)
 
@@ -490,7 +570,16 @@ class NoamAnnealing(_LRScheduler):
 
 
 class NoamHoldAnnealing(WarmupHoldPolicy):
-    def __init__(self, optimizer, *, max_steps, decay_rate=0.5, min_lr=0.0, last_epoch=-1, **kwargs):
+    def __init__(
+        self,
+        optimizer,
+        *,
+        max_steps,
+        decay_rate=0.5,
+        min_lr=0.0,
+        last_epoch=-1,
+        **kwargs,
+    ):
         """
         Implementation of the Noam Hold Annealing policy from the SqueezeFormer paper.
 
@@ -528,7 +617,13 @@ class NoamHoldAnnealing(WarmupHoldPolicy):
             min_lr: Minimum learning rate.
         """
         self.decay_rate = decay_rate
-        super().__init__(optimizer=optimizer, max_steps=max_steps, last_epoch=last_epoch, min_lr=min_lr, **kwargs)
+        super().__init__(
+            optimizer=optimizer,
+            max_steps=max_steps,
+            last_epoch=last_epoch,
+            min_lr=min_lr,
+            **kwargs,
+        )
 
     def _get_lr(self, step):
         if self.warmup_steps is None or self.warmup_steps == 0:
@@ -555,7 +650,13 @@ class NoamHoldAnnealing(WarmupHoldPolicy):
 
 class WarmupAnnealing(WarmupPolicy):
     def __init__(self, optimizer, *, max_steps, last_epoch=-1, min_lr=0.0, **kwargs):
-        super().__init__(optimizer=optimizer, max_steps=max_steps, last_epoch=last_epoch, min_lr=min_lr, **kwargs)
+        super().__init__(
+            optimizer=optimizer,
+            max_steps=max_steps,
+            last_epoch=last_epoch,
+            min_lr=min_lr,
+            **kwargs,
+        )
 
     def _get_lr(self, step):
         delta_lr = self.base_lrs[0] - self.min_lr
@@ -566,7 +667,13 @@ class WarmupAnnealing(WarmupPolicy):
 
 class InverseSquareRootAnnealing(WarmupPolicy):
     def __init__(self, optimizer, *, max_steps, last_epoch=-1, min_lr=0.0, **kwargs):
-        super().__init__(optimizer=optimizer, max_steps=max_steps, **kwargs, last_epoch=last_epoch, min_lr=min_lr)
+        super().__init__(
+            optimizer=optimizer,
+            max_steps=max_steps,
+            **kwargs,
+            last_epoch=last_epoch,
+            min_lr=min_lr,
+        )
 
     def _get_lr(self, step):
         denom = ((step + 1) / (self.warmup_steps + 1)) ** 0.5
@@ -576,18 +683,40 @@ class InverseSquareRootAnnealing(WarmupPolicy):
 
 class T5InverseSquareRootAnnealing(SquareRootConstantPolicy):
     def __init__(self, optimizer, *, max_steps, last_epoch=-1, min_lr=0.0, **kwargs):
-        super().__init__(optimizer=optimizer, max_steps=max_steps, **kwargs, last_epoch=last_epoch, min_lr=min_lr)
+        super().__init__(
+            optimizer=optimizer,
+            max_steps=max_steps,
+            **kwargs,
+            last_epoch=last_epoch,
+            min_lr=min_lr,
+        )
 
     def _get_lr(self, step):
-        return [1 / (step ** 0.5) for _ in self.base_lrs]
+        return [1 / (step**0.5) for _ in self.base_lrs]
 
 
 class PolynomialDecayAnnealing(WarmupPolicy):
-    def __init__(self, optimizer, *, max_steps, min_lr=0.0, power=1.0, cycle=False, last_epoch=-1, **kwargs):
+    def __init__(
+        self,
+        optimizer,
+        *,
+        max_steps,
+        min_lr=0.0,
+        power=1.0,
+        cycle=False,
+        last_epoch=-1,
+        **kwargs,
+    ):
         self.power = power
         self.cycle = cycle
 
-        super().__init__(optimizer=optimizer, max_steps=max_steps, last_epoch=last_epoch, min_lr=min_lr, **kwargs)
+        super().__init__(
+            optimizer=optimizer,
+            max_steps=max_steps,
+            last_epoch=last_epoch,
+            min_lr=min_lr,
+            **kwargs,
+        )
 
     def _get_lr(self, step):
         new_lrs = [
@@ -605,11 +734,27 @@ class PolynomialDecayAnnealing(WarmupPolicy):
 
 
 class PolynomialHoldDecayAnnealing(WarmupHoldPolicy):
-    def __init__(self, optimizer, *, max_steps, min_lr=0.0, power=1.0, cycle=False, last_epoch=-1, **kwargs):
+    def __init__(
+        self,
+        optimizer,
+        *,
+        max_steps,
+        min_lr=0.0,
+        power=1.0,
+        cycle=False,
+        last_epoch=-1,
+        **kwargs,
+    ):
         self.power = power
         self.cycle = cycle
 
-        super().__init__(optimizer=optimizer, max_steps=max_steps, last_epoch=last_epoch, min_lr=min_lr, **kwargs)
+        super().__init__(
+            optimizer=optimizer,
+            max_steps=max_steps,
+            last_epoch=last_epoch,
+            min_lr=min_lr,
+            **kwargs,
+        )
 
     def _get_lr(self, step):
         new_lrs = [
@@ -626,7 +771,9 @@ class PolynomialHoldDecayAnnealing(WarmupHoldPolicy):
         return new_lrs
 
 
-def register_scheduler(name: str, scheduler: _LRScheduler, scheduler_params: SchedulerParams):
+def register_scheduler(
+    name: str, scheduler: _LRScheduler, scheduler_params: SchedulerParams
+):
     """
     Checks if the scheduler name exists in the registry, and if it doesnt, adds it.
 
@@ -638,7 +785,9 @@ def register_scheduler(name: str, scheduler: _LRScheduler, scheduler_params: Sch
         scheduler_params: The parameters as a dataclass of the scheduler
     """
     if name in AVAILABLE_SCHEDULERS:
-        raise ValueError(f"Cannot override pre-existing schedulers. Conflicting scheduler name = {name}")
+        raise ValueError(
+            f"Cannot override pre-existing schedulers. Conflicting scheduler name = {name}"
+        )
 
     AVAILABLE_SCHEDULERS[name] = scheduler
 
@@ -659,13 +808,17 @@ def get_scheduler(name: str, **kwargs: Optional[Dict[str, Any]]) -> _LRScheduler
     """
     if name not in AVAILABLE_SCHEDULERS:
         raise ValueError(
-            f"Cannot resolve scheduler{name}'. Available optimizers are : " f"{AVAILABLE_SCHEDULERS.keys()}"
+            f"Cannot resolve scheduler{name}'. Available optimizers are : "
+            f"{AVAILABLE_SCHEDULERS.keys()}"
         )
 
     scheduler_cls = AVAILABLE_SCHEDULERS[name]
     # Pop 'max_steps' if it's not required by the scheduler
-    if 'max_steps' in kwargs and 'max_steps' not in inspect.signature(scheduler_cls).parameters:
-        kwargs.pop('max_steps')
+    if (
+        "max_steps" in kwargs
+        and "max_steps" not in inspect.signature(scheduler_cls).parameters
+    ):
+        kwargs.pop("max_steps")
     scheduler = partial(scheduler_cls, **kwargs)
     return scheduler
 
@@ -679,19 +832,19 @@ def prepare_lr_scheduler(
     Constructs an LR Scheduler (optionally) for a given optimizer, based on a config with the following schema
 
     optim:
-      name: <name of optimizer>
-      lr: <maximal learning rate>
+        name: <name of optimizer>
+        lr: <maximal learning rate>
 
-      # <additional optimizer arguments>
-      args:
+        # <additional optimizer arguments>
+        args:
         name: auto  # special keyword, resolves to correct optimizer config for given optimizer name
         # cls: roar.core.config.optimizers.NovogradParams  # explicit instantiation by class path
         params:  # optional override parameters for the optimizer config
-          betas: [0.8, 0.5]
-          weight_decay: 0.001
+            betas: [0.8, 0.5]
+            weight_decay: 0.001
 
-      # scheduler setup
-      sched:
+    # scheduler setup
+    sched:
         name: <name of scheduler>
         iters_per_batch: null # computed at runtime; mandatory to have
         max_steps: -1 # computed at runtime or explicitly set here; mandatory to have
@@ -700,11 +853,11 @@ def prepare_lr_scheduler(
         monitor: val_loss
         reduce_on_plateau: false
 
-        # <scheduler config override>
-        args:
-          name: auto  # special keyword, resolves to correct optimizer config for given optimizer name
-          # cls: roar.core.config.schedulers.CosineAnnealingParams  # explicit instantiation by class path
-          params:  # optional override parameters for the optimizer config
+    # <scheduler config override>
+    args:
+    name: auto  # special keyword, resolves to correct optimizer config for given optimizer name
+        # cls: roar.core.config.schedulers.CosineAnnealingParams  # explicit instantiation by class path
+        params:  # optional override parameters for the optimizer config
             warmup_steps: null
             warmup_ratio: null
             min_lr: 0.0
@@ -733,33 +886,35 @@ def prepare_lr_scheduler(
         scheduler_config = OmegaConf.to_container(scheduler_config, resolve=True)
 
     # Test to see if config follows above schema
-    interval = 'step'
+    interval = "step"
     if scheduler_config is not None:
-        if 'args' in scheduler_config:
-            scheduler_args = scheduler_config.pop('args')
+        if "args" in scheduler_config:
+            scheduler_args = scheduler_config.pop("args")
         else:
             scheduler_args = copy.deepcopy(scheduler_config)
 
             # Remove extra parameters from scheduler_args nest
             # Assume all other parameters are to be passed into scheduler constructor
-            scheduler_args.pop('name', None)
-            scheduler_args.pop('t_max_epochs', None)
-            scheduler_args.pop('t_accumulate_grad_batches', None)
-            scheduler_args.pop('t_limit_train_batches', None)
-            scheduler_args.pop('t_num_workers', None)
-            scheduler_args.pop('monitor', None)
-            scheduler_args.pop('reduce_on_plateau', None)
+            scheduler_args.pop("name", None)
+            scheduler_args.pop("t_max_epochs", None)
+            scheduler_args.pop("t_accumulate_grad_batches", None)
+            scheduler_args.pop("t_limit_train_batches", None)
+            scheduler_args.pop("t_num_workers", None)
+            scheduler_args.pop("monitor", None)
+            scheduler_args.pop("reduce_on_plateau", None)
 
-        if 'name' in scheduler_config and scheduler_config['name'] in EPOCH_SCHEDULERS:
-            interval = 'epoch'
+        if "name" in scheduler_config and scheduler_config["name"] in EPOCH_SCHEDULERS:
+            interval = "epoch"
 
     else:
         # Return gracefully in case `sched` was not supplied; inform user
-        logging.info('Scheduler not initialized as no `sched` config supplied to setup_optimizer()')
+        logging.info(
+            "Scheduler not initialized as no `sched` config supplied to setup_optimizer()"
+        )
         return None
 
     # Try instantiation of scheduler params from config class path
-    if '_target_' in scheduler_args:
+    if "_target_" in scheduler_args:
         scheduler_args_cfg = OmegaConf.create(scheduler_args)
         scheduler_conf = hydra.utils.instantiate(scheduler_args_cfg)
         scheduler_args = vars(scheduler_conf)
@@ -767,15 +922,15 @@ def prepare_lr_scheduler(
         # Get name of the scheduler
         scheduler_name = scheduler_conf.__class__.__name__
 
-        if 'Params' in scheduler_name:
-            scheduler_name = scheduler_name.replace('Params', '')
+        if "Params" in scheduler_name:
+            scheduler_name = scheduler_name.replace("Params", "")
 
     else:
         # Class path instantiation failed; try resolving "name" component
 
         # Get name of the scheduler
-        if 'name' in scheduler_config:
-            scheduler_name = scheduler_config['name']
+        if "name" in scheduler_config:
+            scheduler_name = scheduler_config["name"]
         else:
             logging.warning(
                 "Could not resolve classpath for Scheduler Config, and `name` "
@@ -785,54 +940,62 @@ def prepare_lr_scheduler(
             return None
 
         # If class path was not provided, perhaps `name` is provided for resolution
-        if 'name' in scheduler_args:
+        if "name" in scheduler_args:
             # If `auto` is passed as name for resolution of optimizer name,
             # then lookup optimizer name and resolve its parameter config
-            if scheduler_args['name'] == 'auto':
+            if scheduler_args["name"] == "auto":
                 scheduler_params_name = "{}Params".format(scheduler_name)
             else:
-                scheduler_params_name = scheduler_args['name']
+                scheduler_params_name = scheduler_args["name"]
 
             # Get override arguments provided in the config yaml file / Dict Config
-            scheduler_params_override = scheduler_args.get('params', {})
+            scheduler_params_override = scheduler_args.get("params", {})
 
             # If params is itself a dict config object provided explicitly in Dict Config
             # Resolve to dictionary for convenience
             if isinstance(scheduler_params_override, DictConfig):
-                scheduler_params_override = OmegaConf.to_container(scheduler_params_override, resolve=True)
+                scheduler_params_override = OmegaConf.to_container(
+                    scheduler_params_override, resolve=True
+                )
 
             # Get and instantiate the Config dataclass for this scheduler
-            scheduler_params_cls = get_scheduler_config(scheduler_params_name, **scheduler_params_override)
-            scheduler_params = scheduler_params_cls()  # instantiate the parameters object
-            scheduler_args = vars(scheduler_params)  # extract just the dictionary from the Config object
+            scheduler_params_cls = get_scheduler_config(
+                scheduler_params_name, **scheduler_params_override
+            )
+            scheduler_params = (
+                scheduler_params_cls()
+            )  # instantiate the parameters object
+            scheduler_args = vars(
+                scheduler_params
+            )  # extract just the dictionary from the Config object
 
         else:
             # assume the input dictionary is schedular args (from dataclasses / omegaconf)
             pass
 
     # Extract value to monitor in losses, if provided.
-    if 'monitor' in scheduler_config:
-        monitor = scheduler_config.get('monitor')
+    if "monitor" in scheduler_config:
+        monitor = scheduler_config.get("monitor")
     else:
         # Default to train loss
-        monitor = 'loss'
+        monitor = "loss"
 
     # Store exact max_steps if it is provided
-    if 'max_steps' in scheduler_config and scheduler_config['max_steps'] is not None:
-        max_steps = scheduler_config['max_steps']
+    if "max_steps" in scheduler_config and scheduler_config["max_steps"] is not None:
+        max_steps = scheduler_config["max_steps"]
 
-    elif 't_max_epochs' in scheduler_config:
+    elif "t_max_epochs" in scheduler_config:
         # Compute effective max_steps if t_max_epochs is provided
         if train_dataloader is None:
             logging.warning(
-                'As `t_max_epochs` is provided/computed, it is required to pass the train dataloader in order\n'
-                'to compute effective maximum number of steps.\n'
-                'Scheduler will not be instantiated !'
+                "As `t_max_epochs` is provided/computed, it is required to pass the train dataloader in order\n"
+                "to compute effective maximum number of steps.\n"
+                "Scheduler will not be instantiated !"
             )
             return None
 
         # Raise exception if neither `max_steps` nor `t_max_epochs` is provided
-        if scheduler_config.get('t_max_epochs', None) is None:
+        if scheduler_config.get("t_max_epochs", None) is None:
             logging.warning(
                 "`t_max_epochs` cannot be None when `max_steps` is not not provided.\n"
                 "This can occur when `train dataloader` is not available to correctly "
@@ -842,10 +1005,10 @@ def prepare_lr_scheduler(
             return None
 
         # Get iters_per_batch
-        max_epochs = scheduler_config.get('t_max_epochs')
-        accumulate_grad_batches = scheduler_config.get('t_accumulate_grad_batches')
-        limit_train_batches = scheduler_config.get('t_limit_train_batches')
-        num_workers = scheduler_config.get('t_num_workers')
+        max_epochs = scheduler_config.get("t_max_epochs")
+        accumulate_grad_batches = scheduler_config.get("t_accumulate_grad_batches")
+        limit_train_batches = scheduler_config.get("t_limit_train_batches")
+        num_workers = scheduler_config.get("t_num_workers")
 
         # Compute effective num max_steps
         num_samples = len(train_dataloader.dataset)
@@ -853,13 +1016,20 @@ def prepare_lr_scheduler(
         # we may need to override ModelPT setup_optimization
         if train_dataloader.batch_size is not None:
             batch_size = train_dataloader.batch_size
-        elif hasattr(train_dataloader, 'batch_sampler') and train_dataloader.batch_sampler is not None:
+        elif (
+            hasattr(train_dataloader, "batch_sampler")
+            and train_dataloader.batch_sampler is not None
+        ):
             if train_dataloader.batch_sampler.micro_batch_size is not None:
                 batch_size = train_dataloader.batch_sampler.micro_batch_size
             else:
-                raise ValueError(f'Could not find batch_size from batch_sampler: {train_dataloader.batch_sampler}')
+                raise ValueError(
+                    f"Could not find batch_size from batch_sampler: {train_dataloader.batch_sampler}"
+                )
         else:
-            raise ValueError(f'Could not find batch_size from train_dataloader: {train_dataloader}')
+            raise ValueError(
+                f"Could not find batch_size from train_dataloader: {train_dataloader}"
+            )
         drop_last = train_dataloader.drop_last
 
         max_steps = compute_max_steps(
@@ -881,14 +1051,14 @@ def prepare_lr_scheduler(
         return None
 
     # Inject max_steps (effective or provided) into the scheduler config
-    scheduler_args['max_steps'] = max_steps
+    scheduler_args["max_steps"] = max_steps
 
     # Get the scheduler class from the config
     scheduler_cls = get_scheduler(scheduler_name, **scheduler_args)
 
     # Pop 'max_steps' if it's not required by the scheduler
-    if 'max_steps' not in inspect.signature(scheduler_cls).parameters:
-        scheduler_args.pop('max_steps')
+    if "max_steps" not in inspect.signature(scheduler_cls).parameters:
+        scheduler_args.pop("max_steps")
 
     # Instantiate the LR schedule
     schedule = scheduler_cls(optimizer, **scheduler_args)
@@ -908,17 +1078,23 @@ def prepare_lr_scheduler(
         reduce_lr_on_plateau = False
 
     schedule_dict = {
-        'scheduler': schedule,
-        'interval': interval,
-        'frequency': 1,
-        'monitor': monitor,
-        'reduce_on_plateau': reduce_lr_on_plateau,
+        "scheduler": schedule,
+        "interval": interval,
+        "frequency": 1,
+        "monitor": monitor,
+        "reduce_on_plateau": reduce_lr_on_plateau,
     }
     return schedule_dict
 
 
 def compute_max_steps(
-    max_epochs, accumulate_grad_batches, limit_train_batches, num_workers, num_samples, batch_size, drop_last
+    max_epochs,
+    accumulate_grad_batches,
+    limit_train_batches,
+    num_workers,
+    num_samples,
+    batch_size,
+    drop_last,
 ):
     _round = math.floor if drop_last else math.ceil
 
@@ -928,13 +1104,13 @@ def compute_max_steps(
         logging.warning(
             "Please note that drop_last is broken in pytorch 1.6.0. We will fix when pytorch 1.7.0 is released"
         )
-        # TODO: Master version, not in pytorch 1.6.0
+        # TODO: Check and remove this warning as we already use pytorch 2.0-
         # sampler_num_samples = math.ceil((num_samples - num_workers)/ num_workers)
 
     steps_per_epoch = _round(sampler_num_samples / batch_size)
     if isinstance(limit_train_batches, int) or limit_train_batches == 0.0:
         steps_per_epoch = min(steps_per_epoch, int(limit_train_batches))
-    elif steps_per_epoch != float('inf'):
+    elif steps_per_epoch != float("inf"):
         # limit_train_batches is a percentage of batches per epoch
         steps_per_epoch = int(steps_per_epoch * limit_train_batches)
 
@@ -942,25 +1118,25 @@ def compute_max_steps(
 
 
 AVAILABLE_SCHEDULERS = {
-    'WarmupPolicy': WarmupPolicy,
-    'WarmupHoldPolicy': WarmupHoldPolicy,
-    'SquareAnnealing': SquareAnnealing,
-    'CosineAnnealing': CosineAnnealing,
-    'NoamAnnealing': NoamAnnealing,
-    'NoamHoldAnnealing': NoamHoldAnnealing,
-    'WarmupAnnealing': WarmupAnnealing,
-    'InverseSquareRootAnnealing': InverseSquareRootAnnealing,
-    'T5InverseSquareRootAnnealing': T5InverseSquareRootAnnealing,
-    'SquareRootAnnealing': SquareRootAnnealing,
-    'PolynomialDecayAnnealing': PolynomialDecayAnnealing,
-    'PolynomialHoldDecayAnnealing': PolynomialHoldDecayAnnealing,
-    'StepLR': pt_scheduler.StepLR,
-    'ExponentialLR': pt_scheduler.ExponentialLR,
-    'ReduceLROnPlateau': pt_scheduler.ReduceLROnPlateau,
-    'CyclicLR': pt_scheduler.CyclicLR,
+    "WarmupPolicy": WarmupPolicy,
+    "WarmupHoldPolicy": WarmupHoldPolicy,
+    "SquareAnnealing": SquareAnnealing,
+    "CosineAnnealing": CosineAnnealing,
+    "NoamAnnealing": NoamAnnealing,
+    "NoamHoldAnnealing": NoamHoldAnnealing,
+    "WarmupAnnealing": WarmupAnnealing,
+    "InverseSquareRootAnnealing": InverseSquareRootAnnealing,
+    "T5InverseSquareRootAnnealing": T5InverseSquareRootAnnealing,
+    "SquareRootAnnealing": SquareRootAnnealing,
+    "PolynomialDecayAnnealing": PolynomialDecayAnnealing,
+    "PolynomialHoldDecayAnnealing": PolynomialHoldDecayAnnealing,
+    "StepLR": pt_scheduler.StepLR,
+    "ExponentialLR": pt_scheduler.ExponentialLR,
+    "ReduceLROnPlateau": pt_scheduler.ReduceLROnPlateau,
+    "CyclicLR": pt_scheduler.CyclicLR,
 }
 
 EPOCH_SCHEDULERS = {
-    'ExponentialLR': pt_scheduler.ExponentialLR,
-    'ReduceLROnPlateau': pt_scheduler.ReduceLROnPlateau,
+    "ExponentialLR": pt_scheduler.ExponentialLR,
+    "ReduceLROnPlateau": pt_scheduler.ReduceLROnPlateau,
 }

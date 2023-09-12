@@ -11,10 +11,10 @@ ROAR is a toolkit for Indic languages that provides a unified interface for vari
 - [x] Flash Attention
 - [x] TransformerLayer
 - [x] One TTS Alignment
-- [x] Fastpitch
+- [ ] Fastpitch
+- [ ] HiFi-GAN
 - [ ] Sparse Attention
 - [ ] ConformerLayer
-- [ ] HiFi-GAN
 - [ ] WaveGrad
 - [ ] GlowTTS
 - [ ] FastDiff

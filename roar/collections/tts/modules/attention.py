@@ -10,6 +10,7 @@ from roar.collections.tts.modules.submodules import (
     ConditionalLayerNorm,
     LinearNorm,
 )
+
 from roar.collections.tts.parts.utils.helpers import get_mask_from_lengths
 from roar.core.classes import NeuralModule, adapter_mixins, typecheck
 from roar.core.neural_types.elements import (
@@ -56,7 +57,6 @@ class MultiHeadAttn(nn.Module):
 
         self.qkv_net = nn.Linear(d_model, 3 * n_head * d_head)
         self.drop = nn.Dropout(dropout)
-        # self.dropatt = nn.Dropout(dropatt)  #TODO: remove this as we do not implement attention by ourselves but rather use torch.nn.F.scaled_dot_product_attention
         self.dropatt = dropatt
         self.o_net = nn.Linear(n_head * d_head, d_model, bias=False)
         self.layer_norm = ConditionalLayerNorm(
@@ -68,7 +68,6 @@ class MultiHeadAttn(nn.Module):
 
     def _forward(self, inp, attn_mask=None, conditioning=None):
         residual = inp
-        # TODO: replace custom attention with torch.nn.F.scaled_dot_product_attention with flash support
         if self.pre_lnorm:
             # layer normalization
             inp = self.layer_norm(inp, conditioning)

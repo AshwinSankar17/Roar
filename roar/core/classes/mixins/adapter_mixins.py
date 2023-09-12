@@ -24,8 +24,12 @@ class AdapterRegistryInfo:
     adapter_class_path: str = ""
 
     def __post_init__(self):
-        self.base_class_path = f'{self.base_class.__module__}.{self.base_class.__name__}'
-        self.adapter_class_path = f'{self.adapter_class.__module__}.{self.adapter_class.__name__}'
+        self.base_class_path = (
+            f"{self.base_class.__module__}.{self.base_class.__name__}"
+        )
+        self.adapter_class_path = (
+            f"{self.adapter_class.__module__}.{self.adapter_class.__name__}"
+        )
 
 
 def register_adapter(base_class: type, adapter_class: type):
@@ -37,19 +41,25 @@ def register_adapter(base_class: type, adapter_class: type):
         adapter_class: A Class, which is the subclass of the base class, and implements the Adapter mixin methods.
     """
     global ADAPTER_REGISTRY
-    base_class_path = f'{base_class.__module__}.{base_class.__name__}'
-    adapter_class_path = f'{adapter_class.__module__}.{adapter_class.__name__}'
+    base_class_path = f"{base_class.__module__}.{base_class.__name__}"
+    adapter_class_path = f"{adapter_class.__module__}.{adapter_class.__name__}"
 
     # test if base class already in registry
     if base_class_path in ADAPTER_REGISTRY:
-        raise ValueError(f"`{base_class_path}` has already been added to the adapter registry !")
+        raise ValueError(
+            f"`{base_class_path}` has already been added to the adapter registry !"
+        )
 
     # test if adapter is a subclass of the base class
     if not issubclass(adapter_class, base_class):
-        raise ValueError(f"`{adapter_class_path}` is not a sub-class of {base_class_path} !")
+        raise ValueError(
+            f"`{adapter_class_path}` is not a sub-class of {base_class_path} !"
+        )
 
     # register the base class : adapter class pair
-    ADAPTER_REGISTRY[base_class_path] = AdapterRegistryInfo(base_class=base_class, adapter_class=adapter_class)
+    ADAPTER_REGISTRY[base_class_path] = AdapterRegistryInfo(
+        base_class=base_class, adapter_class=adapter_class
+    )
 
     # attach adapter class to base class
     base_class._meta_adapter_class = adapter_class
@@ -75,10 +85,10 @@ def get_registered_adapter(cls: Union[str, type]) -> Optional[AdapterRegistryInf
         cls = model_utils.import_class_by_path(cls)
 
     # If an adapter class was provided, de-reference its base class
-    if hasattr(cls, '_meta_base_class'):
+    if hasattr(cls, "_meta_base_class"):
         cls = cls._meta_base_class
 
-    class_path = f'{cls.__module__}.{cls.__name__}'
+    class_path = f"{cls.__module__}.{cls.__name__}"
 
     # If base class, check registry
     if class_path in ADAPTER_REGISTRY:
@@ -87,7 +97,9 @@ def get_registered_adapter(cls: Union[str, type]) -> Optional[AdapterRegistryInf
     return None
 
 
-def _prepare_default_adapter_config(*, global_key: str, meta_key: str, cfg: DictConfig = None) -> DictConfig:
+def _prepare_default_adapter_config(
+    *, global_key: str, meta_key: str, cfg: DictConfig = None
+) -> DictConfig:
     if cfg is None:
         cfg = OmegaConf.create({})
 
@@ -98,14 +110,14 @@ def _prepare_default_adapter_config(*, global_key: str, meta_key: str, cfg: Dict
         if meta_key not in cfg[global_key]:
             cfg[global_key][meta_key] = OmegaConf.create({})
 
-        if 'modules' not in cfg[global_key][meta_key]:
-            cfg[global_key][meta_key]['modules'] = OmegaConf.create({})
+        if "modules" not in cfg[global_key][meta_key]:
+            cfg[global_key][meta_key]["modules"] = OmegaConf.create({})
 
     return cfg
 
 
 class AdapterModuleMixin(ABC):
-    """ Generic Adapter Mixin that can augment any torch.nn.Module with Adapter module support.
+    """Generic Adapter Mixin that can augment any torch.nn.Module with Adapter module support.
 
     This mixin class adds a hierarchical way to add any type of Adapter modules to a pre-existing module.
     Since Models are inherently also nn.Module, this mixin can be attached to any Model or Module.
@@ -130,8 +142,8 @@ class AdapterModuleMixin(ABC):
                 metadata of the adapter config.
 
     .. note::
-    
-        This module is **not** responsible for maintaining its config. Subclasses must ensure config is updated 
+
+        This module is **not** responsible for maintaining its config. Subclasses must ensure config is updated
         or preserved as needed. It is the responsibility of the subclasses to propagate the most up to date config to
         lower layers.
     """
@@ -156,7 +168,7 @@ class AdapterModuleMixin(ABC):
         if len(adapter_types) > 0:
             test = model_utils.import_class_by_path(cfg._target_)
             for _type in adapter_types:
-                # TODO: (@adithyare) should revisit if subclass is the best check...
+                # TODO: should revisit if subclass is the best check...
                 if issubclass(test, _type):
                     _pass_types = True
                     break
@@ -176,11 +188,11 @@ class AdapterModuleMixin(ABC):
             cfg = DictConfig(cfg)
 
         # Add adapter_layer ModuleDict() if not present.
-        if not hasattr(self, 'adapter_layer'):
+        if not hasattr(self, "adapter_layer"):
             self.adapter_layer = nn.ModuleDict()
 
         # Add adapter_cfg if it doesnt exist or hasnt been assigned yet.
-        if not hasattr(self, 'adapter_cfg'):
+        if not hasattr(self, "adapter_cfg"):
             self.adapter_cfg = OmegaConf.create({})
 
         # Resolve the module name and adapter name (if module name is provided)
@@ -197,14 +209,16 @@ class AdapterModuleMixin(ABC):
 
         # Assert that name is not `adapter_global_cfg_key`
         if adapter_name == self.adapter_global_cfg_key:
-            raise ValueError(f"Adapters cannot have the reserved name : `{self.adapter_global_cfg_key}`")
+            raise ValueError(
+                f"Adapters cannot have the reserved name : `{self.adapter_global_cfg_key}`"
+            )
 
         # Update internal config and instantiate the Adapter module
         with open_dict(cfg), open_dict(self.adapter_cfg):
-            adapter_enabled = cfg.pop('enabled', True)
+            adapter_enabled = cfg.pop("enabled", True)
             self.adapter_layer[adapter_name] = instantiate(cfg)
 
-            cfg['enabled'] = adapter_enabled
+            cfg["enabled"] = adapter_enabled
             self.adapter_cfg[adapter_name] = cfg
 
     def is_adapter_available(self) -> bool:
@@ -215,7 +229,7 @@ class AdapterModuleMixin(ABC):
             bool, determining if any Adapter module has been instantiated. Returns true even if the adapters are
             enabled or disabled, false only if no adapters exist.
         """
-        if hasattr(self, 'adapter_layer'):
+        if hasattr(self, "adapter_layer"):
             return self.adapter_layer is not None and len(self.adapter_layer) > 0
         return False
 
@@ -248,19 +262,19 @@ class AdapterModuleMixin(ABC):
                     continue
 
                 # Enable/Disable the current adapter
-                self.adapter_cfg[key]['enabled'] = enabled
+                self.adapter_cfg[key]["enabled"] = enabled
         else:
             _, adapter_name = self.resolve_adapter_module_name_(name)
 
             # Cannot set the state of the global config for adapters
             if adapter_name == self.adapter_global_cfg_key:
                 raise ValueError(
-                    f'Cannot set the state of the global config of adapters, '
-                    f'given name = `{self.adapter_global_cfg_key}`'
+                    f"Cannot set the state of the global config of adapters, "
+                    f"given name = `{self.adapter_global_cfg_key}`"
                 )
 
             # Enable/Disable just named adapter
-            self.adapter_cfg[adapter_name]['enabled'] = enabled
+            self.adapter_cfg[adapter_name]["enabled"] = enabled
 
     def get_enabled_adapters(self) -> List[str]:
         """
@@ -275,7 +289,7 @@ class AdapterModuleMixin(ABC):
 
         # populate set of available modules (by name)
         available_module_names = set([])
-        if hasattr(self, 'adapter_layer'):
+        if hasattr(self, "adapter_layer"):
             available_module_names.update(list(self.adapter_layer.keys()))
 
         # populate list of allowed adapter classes
@@ -288,7 +302,7 @@ class AdapterModuleMixin(ABC):
                 continue
 
             # If name is in the current available modules, and it is enabled in the config
-            if name in available_module_names and self.adapter_cfg[name]['enabled']:
+            if name in available_module_names and self.adapter_cfg[name]["enabled"]:
                 # Check if type is supported (if available) and is an enabled adapter
                 if len(adapter_types) > 0:
                     module = self.get_adapter_module(name)
@@ -336,7 +350,9 @@ class AdapterModuleMixin(ABC):
         for s in adapter_types:
             if inspect.isclass(s):
                 if not issubclass(s, nn.Module):
-                    raise ValueError(f"Attempted to add class ({s}) but is not a subclass of torch.nn.Module")
+                    raise ValueError(
+                        f"Attempted to add class ({s}) but is not a subclass of torch.nn.Module"
+                    )
 
                 types.append(s)
             else:
@@ -344,14 +360,16 @@ class AdapterModuleMixin(ABC):
 
         self._accepted_adapter_types = set(types)
 
-    def get_accepted_adapter_types(self,) -> Set[type]:
+    def get_accepted_adapter_types(
+        self,
+    ) -> Set[type]:
         """
         Utility function to get the set of all classes that are accepted by the module.
 
         Returns:
             Returns the set of accepted adapter types as classes, otherwise an empty set.
         """
-        if hasattr(self, '_accepted_adapter_types'):
+        if hasattr(self, "_accepted_adapter_types"):
             return self._accepted_adapter_types
         else:
             return set([])
@@ -376,46 +394,58 @@ class AdapterModuleMixin(ABC):
         if freeze_batchnorm:
             for mname, module in self.named_modules():
                 if isinstance(module, (nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d)):
-                    if hasattr(module, 'weight'):
+                    if hasattr(module, "weight"):
                         module.weight.requires_grad_(False)
-                    if hasattr(module, 'bias'):
+                    if hasattr(module, "bias"):
                         module.bias.requires_grad_(False)
                     module.eval()
-                    module.track_running_stats = False  # prevent running stats from updated during finetuning
+                    module.track_running_stats = (
+                        False  # prevent running stats from updated during finetuning
+                    )
 
                     logging.info(f"Froze module {mname}: {module}")
 
         adapter_names = set([])
         for module in self.modules():  # access PT subclass method via inheritance
-            if hasattr(module, 'adapter_layer') and module.is_adapter_available():
+            if hasattr(module, "adapter_layer") and module.is_adapter_available():
                 for name, config in self.adapter_cfg.items():
                     # Skip global adapter config
                     if name == self.adapter_global_cfg_key:
                         continue
 
                     # Check if adapter is enabled or not
-                    if self.adapter_cfg[name]['enabled'] and name in module.adapter_layer:
+                    if (
+                        self.adapter_cfg[name]["enabled"]
+                        and name in module.adapter_layer
+                    ):
                         # Recursively set training mode of submodules
                         module.adapter_layer[name].train()
 
                         # Recursively set grad required for submodules
-                        for pname, param in module.adapter_layer[name].named_parameters():
+                        for pname, param in module.adapter_layer[
+                            name
+                        ].named_parameters():
                             param.requires_grad_(True)
 
                         # unfreeze batch norm if any in the adapter submodules
-                        for mname, module_ in module.adapter_layer[name].named_modules():
-                            if isinstance(module_, (nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d)):
-                                module_.track_running_stats = (
-                                    True  # prevent running stats from updated during finetuning
+                        for mname, module_ in module.adapter_layer[
+                            name
+                        ].named_modules():
+                            if isinstance(
+                                module_,
+                                (nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d),
+                            ):
+                                module_.track_running_stats = True  # prevent running stats from updated during finetuning
+                                logging.info(
+                                    f"Unfroze adapter module {mname}: {module_}"
                                 )
-                                logging.info(f"Unfroze adapter module {mname}: {module_}")
 
                         adapter_names.add(name)
 
         for name in adapter_names:
             logging.info(f"Unfrozen adapter : {name}")
 
-    def forward_enabled_adapters(self, input: 'torch.Tensor'):
+    def forward_enabled_adapters(self, input: "torch.Tensor"):
         """
         Forward's all active adapters one by one with the provided input, and chaining the outputs of each
         adapter layer to the next.
@@ -434,7 +464,7 @@ class AdapterModuleMixin(ABC):
         for adapter_name in enabled_adapters:
             adapter_module = self.adapter_layer[adapter_name]
 
-            if hasattr(adapter_module, 'adapter_strategy'):
+            if hasattr(adapter_module, "adapter_strategy"):
                 strategy = (
                     adapter_module.adapter_strategy
                 )  # type: 'roar.core.classes.mixins.adapter_mixin_strategies.AbstractAdapterStrategy'
@@ -447,7 +477,10 @@ class AdapterModuleMixin(ABC):
 
             # Call a single adapter's forward, and accept its output as the new input for the next adapter.
             input = self.forward_single_enabled_adapter_(
-                input, adapter_module, adapter_name=adapter_name, adapter_strategy=strategy
+                input,
+                adapter_module,
+                adapter_name=adapter_name,
+                adapter_strategy=strategy,
             )
 
         return input
@@ -471,24 +504,24 @@ class AdapterModuleMixin(ABC):
             module_name is set to ''.
         """
         # Attempt to split into module adapter name, iff : exists in the given name.
-        if ':' in name:
+        if ":" in name:
             splits = name.split(":")
             module_name = splits[0]
             adapter_name = ":".join(splits[1:])
             return (module_name, adapter_name)
         else:
             # Prepare default module name
-            module_name = ''
+            module_name = ""
 
             # Can be following cases:
             # 1) Adapters are being restored. In this case, we need to resolve the module name from the config
-            if hasattr(self, 'adapter_cfg') and self.adapter_cfg is not None:
+            if hasattr(self, "adapter_cfg") and self.adapter_cfg is not None:
                 cfg = self.adapter_cfg.get(self.adapter_global_cfg_key, {})
                 cfg = cfg.get(self.adapter_metadata_cfg_key, {})
-                cfg = cfg.get('modules', {})
+                cfg = cfg.get("modules", {})
 
                 # Try to get the module for the given adapter name, if available, else use default.
-                module_name = cfg.get(name, '')
+                module_name = cfg.get(name, "")
 
             # If the above cases dont hold, no module name provided when the user is adding a new adapter.
             # Just return whatever module name was resolved, or the default
@@ -500,13 +533,13 @@ class AdapterModuleMixin(ABC):
         adapter_module: torch.nn.Module,
         *,
         adapter_name: str,
-        adapter_strategy: 'roar.core.classes.mixins.adapter_mixin_strategies.AbstractAdapterStrategy',
+        adapter_strategy: "roar.core.classes.mixins.adapter_mixin_strategies.AbstractAdapterStrategy",
     ):
         """
         Perform the forward step of a single adapter module on some input data.
 
         .. note::
-        
+
             Subclasses can override this method to accommodate more complicate adapter forward steps.
 
         Args:
@@ -526,7 +559,7 @@ class AdapterModuleMixin(ABC):
 
 
 class AdapterModelPTMixin(AdapterModuleMixin):
-    """ Adapter Mixin that can augment a ModelPT subclass with Adapter support.
+    """Adapter Mixin that can augment a ModelPT subclass with Adapter support.
 
     This mixin class should be used only with a top level ModelPT subclass.
     This mixin class adds several utility methods which should be subclassed and overriden to
@@ -562,7 +595,7 @@ class AdapterModelPTMixin(AdapterModuleMixin):
         This method should be called just once at constructor time.
         """
         # Test if `adapters` is part of the config (injected from previous Adapter additions)
-        if 'adapters' in self.cfg:
+        if "adapters" in self.cfg:
             # Set the global config of adapters
             self.update_adapter_cfg(self.cfg.adapters)
 
@@ -583,10 +616,12 @@ class AdapterModelPTMixin(AdapterModuleMixin):
                 del self._restoring_adapters
 
                 # Log the setup adapter name
-                module_name, adapter_name = self.resolve_adapter_module_name_(adapter_name)
+                module_name, adapter_name = self.resolve_adapter_module_name_(
+                    adapter_name
+                )
 
-                if module_name != '':
-                    full_adapter_name = f'{module_name}:{adapter_name}'
+                if module_name != "":
+                    full_adapter_name = f"{module_name}:{adapter_name}"
                 else:
                     full_adapter_name = adapter_name
 
@@ -618,26 +653,33 @@ class AdapterModelPTMixin(AdapterModuleMixin):
         # Update the model.cfg with information about the new adapter from cfg
         with open_dict(cfg), open_dict(self.cfg):
             # Construct the minimum config required to be updated by adapter implementations
-            if 'adapters' not in self.cfg:
+            if "adapters" not in self.cfg:
                 self.cfg.adapters = OmegaConf.create({})
 
             self.cfg.adapters = _prepare_default_adapter_config(
-                global_key=self.adapter_global_cfg_key, meta_key=self.adapter_metadata_cfg_key, cfg=self.cfg.adapters,
+                global_key=self.adapter_global_cfg_key,
+                meta_key=self.adapter_metadata_cfg_key,
+                cfg=self.cfg.adapters,
             )
 
             # If the adapter is not being restored, force unique name to be provided for all adapters.
-            if hasattr(self, '_restoring_adapters') and self._restoring_adapters is not True:
+            if (
+                hasattr(self, "_restoring_adapters")
+                and self._restoring_adapters is not True
+            ):
                 if adapter_name in self.cfg.adapters:
-                    raise ValueError(f"Attempting to add multiple adapters with the same name ({adapter_name}) !")
+                    raise ValueError(
+                        f"Attempting to add multiple adapters with the same name ({adapter_name}) !"
+                    )
 
             # Inject the module name in the adapter metadata cfg
             gcfg = self.adapter_global_cfg_key
             mcfg = self.adapter_metadata_cfg_key
-            self.cfg.adapters[gcfg][mcfg]['modules'][adapter_name] = module_name
+            self.cfg.adapters[gcfg][mcfg]["modules"][adapter_name] = module_name
 
             # By default, enable the adapter that is being added
-            if 'enabled' not in cfg:
-                cfg['enabled'] = True
+            if "enabled" not in cfg:
+                cfg["enabled"] = True
 
             # Assign the
             self.cfg.adapters[adapter_name] = OmegaConf.create(cfg)
@@ -659,10 +701,10 @@ class AdapterModelPTMixin(AdapterModuleMixin):
         """
         self.check_valid_model_with_adapter_support_()
 
-        if 'adapters' in self.cfg:
+        if "adapters" in self.cfg:
             self.update_adapter_cfg(self.cfg.adapters)
 
-        return 'adapters' in self.cfg and len(self.get_enabled_adapters()) > 0
+        return "adapters" in self.cfg and len(self.get_enabled_adapters()) > 0
 
     def set_enabled_adapters(self, name: Optional[str] = None, enabled: bool = True):
         """
@@ -696,8 +738,10 @@ class AdapterModelPTMixin(AdapterModuleMixin):
                     if key == self.adapter_global_cfg_key:
                         continue
 
-                    self.cfg.adapters[key]['enabled'] = enabled
-                    logging.info(f"Setting adapter '{key}' status : Enabled = {enabled}")
+                    self.cfg.adapters[key]["enabled"] = enabled
+                    logging.info(
+                        f"Setting adapter '{key}' status : Enabled = {enabled}"
+                    )
 
             else:
                 # Resolve the module name and adapter name
@@ -706,12 +750,12 @@ class AdapterModelPTMixin(AdapterModuleMixin):
                 # Cannot set the state of the global config for adapters
                 if adapter_name == self.adapter_global_cfg_key:
                     raise ValueError(
-                        f'Cannot set the state of the global config of adapters, '
-                        f'given name = `{self.adapter_global_cfg_key}`'
+                        f"Cannot set the state of the global config of adapters, "
+                        f"given name = `{self.adapter_global_cfg_key}`"
                     )
 
                 # Otherwise, update just the specified adapter.
-                self.cfg.adapters[adapter_name]['enabled'] = enabled
+                self.cfg.adapters[adapter_name]["enabled"] = enabled
                 logging.info(f"Setting adapter '{name}' status : Enabled = {enabled}")
 
             self.update_adapter_cfg(self.cfg.adapters)
@@ -727,7 +771,7 @@ class AdapterModelPTMixin(AdapterModuleMixin):
         """
         self.check_valid_model_with_adapter_support_()
 
-        if 'adapters' in self.cfg:
+        if "adapters" in self.cfg:
             self.update_adapter_cfg(self.cfg.adapters)
         return []
 
@@ -744,7 +788,7 @@ class AdapterModelPTMixin(AdapterModuleMixin):
         Utility method that saves only the adapter module(s), and not the entire model itself.
         This allows the sharing of adapters which are often just a fraction of the size of the full model,
         enabling easier deliver.
-        
+
         .. note::
 
             The saved file is a pytorch compatible pickle file, containing the state dicts of the adapter(s),
@@ -756,8 +800,10 @@ class AdapterModelPTMixin(AdapterModuleMixin):
                 all adapters will be saved to the file. The name can be either the global name (adapter_name),
                 or the module level name (module:adapter_name).
         """
-        if not hasattr(self, 'cfg') or 'adapters' not in self.cfg:
-            raise AttributeError("No adapters have been added to this model, so no adapters can be saved.")
+        if not hasattr(self, "cfg") or "adapters" not in self.cfg:
+            raise AttributeError(
+                "No adapters have been added to this model, so no adapters can be saved."
+            )
 
         output_dict = {}
 
@@ -769,7 +815,7 @@ class AdapterModelPTMixin(AdapterModuleMixin):
             name = self.cfg.adapters.keys()
 
         # Assert that the config must be present to save and restore the adapters.
-        if not hasattr(self.cfg, 'adapters'):
+        if not hasattr(self.cfg, "adapters"):
             raise ValueError(
                 "The model has no adapter config, therefore it cannot save any adapter. "
                 "Please first add one or more adapters to generate the config."
@@ -779,13 +825,15 @@ class AdapterModelPTMixin(AdapterModuleMixin):
         for adapter_name in name:
             if adapter_name != self.adapter_global_cfg_key:
                 # Resolve the adapter name into its components
-                module_name, adapter_name = self.resolve_adapter_module_name_(adapter_name)
+                module_name, adapter_name = self.resolve_adapter_module_name_(
+                    adapter_name
+                )
 
                 # Reconstruct a module adapter's original name. For global adapters, the '' is preserved.
-                if module_name == '':
+                if module_name == "":
                     key = adapter_name
                 else:
-                    key = f'{module_name}:{adapter_name}'
+                    key = f"{module_name}:{adapter_name}"
                 output_dict[key] = []
 
                 # Search all modules with the following criterion -
@@ -814,19 +862,25 @@ class AdapterModelPTMixin(AdapterModuleMixin):
                             output_dict[key].append(state_dict)
 
         # Preserve the binary OmegaConf dictionary of the model's adapter config
-        output_dict['__cfg__'] = self.cfg.adapters
+        output_dict["__cfg__"] = self.cfg.adapters
 
         # Finally, save the adapter state dict(s).
         torch.save(output_dict, filepath)
 
-    def load_adapters(self, filepath: str, name: str = None, map_location: str = None, strict: bool = True):
+    def load_adapters(
+        self,
+        filepath: str,
+        name: str = None,
+        map_location: str = None,
+        strict: bool = True,
+    ):
         """
         Utility method that restores only the adapter module(s), and not the entire model itself.
         This allows the sharing of adapters which are often just a fraction of the size of the full model,
         enabling easier deliver.
 
         .. note::
-        
+
             During restoration, assumes that the model does not currently already have an adapter with
             the name (if provided), or any adapter that shares a name with the state dict's modules
             (if name is not provided). This is to ensure that each adapter name is globally unique
@@ -843,13 +897,13 @@ class AdapterModelPTMixin(AdapterModuleMixin):
         # Determine device
         if map_location is None:
             if torch.cuda.is_available():
-                map_location = 'cuda'
+                map_location = "cuda"
             else:
-                map_location = 'cpu'
+                map_location = "cpu"
 
         # Load the state dict and extract the internal config
         state_dict = torch.load(filepath, map_location=map_location)
-        config = state_dict.pop('__cfg__')
+        config = state_dict.pop("__cfg__")
 
         # Normalize the name to a list of names (exact match with the state dict)
         if isinstance(name, str):
@@ -862,21 +916,23 @@ class AdapterModelPTMixin(AdapterModuleMixin):
         for module_adapter_name in name:
             # Extract current config as copy
             internal_adapter_cfg = None
-            if hasattr(self, 'adapter_cfg') and self.adapter_cfg is not None:
+            if hasattr(self, "adapter_cfg") and self.adapter_cfg is not None:
                 internal_adapter_cfg = self.adapter_cfg
 
             # Override internal adapter config with restoration config
             self.adapter_cfg = config
 
             # Resolve the adapter name and extract the adapter's config from the checkpoint.
-            module_name, adapter_name = self.resolve_adapter_module_name_(module_adapter_name)
+            module_name, adapter_name = self.resolve_adapter_module_name_(
+                module_adapter_name
+            )
             adapter_cfg = config[adapter_name]
 
             # Recreate the module:adapter_name
-            if module_name == '':
+            if module_name == "":
                 module_adapter_name = adapter_name
             else:
-                module_adapter_name = f'{module_name}:{adapter_name}'
+                module_adapter_name = f"{module_name}:{adapter_name}"
 
             # Reset internal adapter config
             self.adapter_cfg = internal_adapter_cfg
@@ -957,7 +1013,7 @@ class AdapterModelPTMixin(AdapterModuleMixin):
         List of valid adapter modules that are supported by the model.
 
         .. note::
-        
+
             Subclasses should override this property and return a list of str names, of all the modules
             that they support, which will enable users to determine where to place the adapter modules.
 
@@ -965,4 +1021,4 @@ class AdapterModelPTMixin(AdapterModuleMixin):
             A list of str, one for each of the adapter modules that are supported. By default, the subclass
             should support the "global adapter" ('').
         """
-        return ['']
+        return [""]

@@ -10,10 +10,12 @@ from typing import List, Optional, Tuple, Union
 import wrapt
 
 from roar.utils import AppState, logging
-from roar.utils.data_utils import resolve_cache_dir  # imported for compatibility: model_utils.resolve_cache_dir()
+from roar.utils.data_utils import (
+    resolve_cache_dir,
+)  # imported for compatibility: model_utils.resolve_cache_dir()
 from roar.utils.data_utils import is_datastore_path
 
-# TODO @blisc: Perhaps refactor instead of import guarding
+# TODO Perhaps refactor instead of import guarding
 
 _HAS_HYDRA = True
 
@@ -25,7 +27,7 @@ except ModuleNotFoundError:
     _HAS_HYDRA = False
 
 
-_VAL_TEST_FASTPATH_KEY = 'ds_item'
+_VAL_TEST_FASTPATH_KEY = "ds_item"
 
 
 class ArtifactPathType(Enum):
@@ -47,7 +49,7 @@ class ArtifactItem:
     hashed_path: Optional[str] = None
 
 
-def resolve_dataset_name_from_cfg(cfg: 'DictConfig') -> Optional[str]:
+def resolve_dataset_name_from_cfg(cfg: "DictConfig") -> Optional[str]:
     """
     Parses items of the provided sub-config to find the first potential key that
     resolves to an existing file or directory.
@@ -121,7 +123,11 @@ def resolve_dataset_name_from_cfg(cfg: 'DictConfig') -> Optional[str]:
             values_are_paths = 0
             for val_i in value:
                 val_i = str(val_i)
-                if os.path.exists(val_i) or os.path.isdir(val_i) or is_datastore_path(val_i):
+                if (
+                    os.path.exists(val_i)
+                    or os.path.isdir(val_i)
+                    or is_datastore_path(val_i)
+                ):
                     values_are_paths += 1
                 else:
                     # reset counter and break inner loop
@@ -131,7 +137,11 @@ def resolve_dataset_name_from_cfg(cfg: 'DictConfig') -> Optional[str]:
                 return key
 
         else:
-            if os.path.exists(str(value)) or os.path.isdir(str(value)) or is_datastore_path(str(value)):
+            if (
+                os.path.exists(str(value))
+                or os.path.isdir(str(value))
+                or is_datastore_path(str(value))
+            ):
                 return key
 
     return None
@@ -148,22 +158,26 @@ def parse_dataset_as_name(name: str) -> str:
     Returns:
         str prefix used to identify uniquely this data/manifest file.
     """
-    if os.path.exists(str(name)) or os.path.isdir(str(name)) or is_datastore_path(str(name)):
+    if (
+        os.path.exists(str(name))
+        or os.path.isdir(str(name))
+        or is_datastore_path(str(name))
+    ):
         name = Path(name).stem
     else:
         name = str(name)
 
     # cleanup name
-    name = name.replace('-', '_')
+    name = name.replace("-", "_")
 
-    if 'manifest' in name:
-        name = name.replace('manifest', '')
+    if "manifest" in name:
+        name = name.replace("manifest", "")
 
-    if 'dataset' in name:
-        name = name.replace('dataset', '')
+    if "dataset" in name:
+        name = name.replace("dataset", "")
 
     # Test if the manifes/dataset name was simply `manifest.yaml` or `dataset.yaml`: Invalid names.
-    if name == '':
+    if name == "":
         raise ValueError(
             "Provided dataset / manifest filename was `manifest.json` or `dataset.json`.\n"
             "Such a name is invalid, since multiple datasets/manifests can share the same name,\n"
@@ -171,8 +185,8 @@ def parse_dataset_as_name(name: str) -> str:
             "for the provided dataset / manifest file."
         )
 
-    if '_' != name[-1]:
-        name = name + '_'
+    if "_" != name[-1]:
+        name = name + "_"
 
     return name
 
@@ -202,7 +216,7 @@ def unique_names_check(name_list: Optional[List[str]]):
             names.add(name)  # we need just hash key check, value is just a placeholder
 
 
-def resolve_validation_dataloaders(model: 'ModelPT'):
+def resolve_validation_dataloaders(model: "ModelPT"):
     """
     Helper method that operates on the ModelPT class to automatically support
     multiple dataloaders for the validation set.
@@ -225,15 +239,17 @@ def resolve_validation_dataloaders(model: 'ModelPT'):
         model: ModelPT subclass, which requires >=1 Validation Dataloaders to be setup.
     """
     if not _HAS_HYDRA:
-        logging.error("This function requires Hydra/Omegaconf and it was not installed.")
+        logging.error(
+            "This function requires Hydra/Omegaconf and it was not installed."
+        )
         exit(1)
     cfg = copy.deepcopy(model._cfg)
     dataloaders = []
 
     # process val_loss_idx
-    if 'val_dl_idx' in cfg.validation_ds:
+    if "val_dl_idx" in cfg.validation_ds:
         cfg = OmegaConf.to_container(cfg)
-        val_dl_idx = cfg['validation_ds'].pop('val_dl_idx')
+        val_dl_idx = cfg["validation_ds"].pop("val_dl_idx")
         cfg = OmegaConf.create(cfg)
     else:
         val_dl_idx = 0
@@ -255,7 +271,6 @@ def resolve_validation_dataloaders(model: 'ModelPT'):
     ds_values = cfg.validation_ds[ds_key]
 
     if isinstance(ds_values, (list, tuple, ListConfig)):
-
         for ds_value in ds_values:
             if isinstance(ds_value, (dict, DictConfig)):
                 # this is a nested dataset
@@ -281,7 +296,7 @@ def resolve_validation_dataloaders(model: 'ModelPT'):
         unique_names_check(name_list=model._validation_names)
 
 
-def resolve_test_dataloaders(model: 'ModelPT'):
+def resolve_test_dataloaders(model: "ModelPT"):
     """
     Helper method that operates on the ModelPT class to automatically support
     multiple dataloaders for the test set.
@@ -304,15 +319,17 @@ def resolve_test_dataloaders(model: 'ModelPT'):
         model: ModelPT subclass, which requires >=1 Test Dataloaders to be setup.
     """
     if not _HAS_HYDRA:
-        logging.error("This function requires Hydra/Omegaconf and it was not installed.")
+        logging.error(
+            "This function requires Hydra/Omegaconf and it was not installed."
+        )
         exit(1)
     cfg = copy.deepcopy(model._cfg)
     dataloaders = []
 
     # process test_loss_idx
-    if 'test_dl_idx' in cfg.test_ds:
+    if "test_dl_idx" in cfg.test_ds:
         cfg = OmegaConf.to_container(cfg)
-        test_dl_idx = cfg['test_ds'].pop('test_dl_idx')
+        test_dl_idx = cfg["test_ds"].pop("test_dl_idx")
         cfg = OmegaConf.create(cfg)
     else:
         test_dl_idx = 0
@@ -334,7 +351,6 @@ def resolve_test_dataloaders(model: 'ModelPT'):
     ds_values = cfg.test_ds[ds_key]
 
     if isinstance(ds_values, (list, tuple, ListConfig)):
-
         for ds_value in ds_values:
             if isinstance(ds_value, (dict, DictConfig)):
                 # this is a nested dataset
@@ -363,17 +379,23 @@ def resolve_test_dataloaders(model: 'ModelPT'):
 
 
 @wrapt.decorator
-def wrap_training_step(wrapped, instance: 'pl.LightningModule', args, kwargs):
+def wrap_training_step(wrapped, instance: "pl.LightningModule", args, kwargs):
     output_dict = wrapped(*args, **kwargs)
 
-    if isinstance(output_dict, dict) and output_dict is not None and 'log' in output_dict:
-        log_dict = output_dict.pop('log')
+    if (
+        isinstance(output_dict, dict)
+        and output_dict is not None
+        and "log" in output_dict
+    ):
+        log_dict = output_dict.pop("log")
         instance.log_dict(log_dict, on_step=True)
 
     return output_dict
 
 
-def convert_model_config_to_dict_config(cfg: Union['DictConfig', 'RoarConfig']) -> 'DictConfig':
+def convert_model_config_to_dict_config(
+    cfg: Union["DictConfig", "RoarConfig"]
+) -> "DictConfig":
     """
     Converts its input into a standard DictConfig.
     Possible input values are:
@@ -387,32 +409,38 @@ def convert_model_config_to_dict_config(cfg: Union['DictConfig', 'RoarConfig']) 
         The equivalent DictConfig
     """
     if not _HAS_HYDRA:
-        logging.error("This function requires Hydra/Omegaconf and it was not installed.")
+        logging.error(
+            "This function requires Hydra/Omegaconf and it was not installed."
+        )
         exit(1)
     if not isinstance(cfg, (OmegaConf, DictConfig)) and is_dataclass(cfg):
         cfg = OmegaConf.structured(cfg)
 
     if not isinstance(cfg, DictConfig):
-        raise ValueError(f"cfg constructor argument must be of type DictConfig/dict but got {type(cfg)} instead.")
+        raise ValueError(
+            f"cfg constructor argument must be of type DictConfig/dict but got {type(cfg)} instead."
+        )
 
     config = OmegaConf.to_container(cfg, resolve=True)
     config = OmegaConf.create(config)
     return config
 
 
-def _convert_config(cfg: 'OmegaConf'):
-    """ Recursive function convertint the configuration from old hydra format to the new one. """
+def _convert_config(cfg: "OmegaConf"):
+    """Recursive function convertint the configuration from old hydra format to the new one."""
     if not _HAS_HYDRA:
-        logging.error("This function requires Hydra/Omegaconf and it was not installed.")
+        logging.error(
+            "This function requires Hydra/Omegaconf and it was not installed."
+        )
         exit(1)
 
     # Get rid of cls -> _target_.
-    if 'cls' in cfg and '_target_' not in cfg:
-        cfg._target_ = cfg.pop('cls')
+    if "cls" in cfg and "_target_" not in cfg:
+        cfg._target_ = cfg.pop("cls")
 
     # Get rid of params.
-    if 'params' in cfg:
-        params = cfg.pop('params')
+    if "params" in cfg:
+        params = cfg.pop("params")
         for param_key, param_val in params.items():
             cfg[param_key] = param_val
 
@@ -422,10 +450,12 @@ def _convert_config(cfg: 'OmegaConf'):
             if isinstance(sub_cfg, DictConfig):
                 _convert_config(sub_cfg)
     except omegaconf_errors.OmegaConfBaseException as e:
-        logging.warning(f"Skipped conversion for config/subconfig:\n{cfg}\n Reason: {e}.")
+        logging.warning(
+            f"Skipped conversion for config/subconfig:\n{cfg}\n Reason: {e}."
+        )
 
 
-def maybe_update_config_version(cfg: 'DictConfig'):
+def maybe_update_config_version(cfg: "DictConfig"):
     """
     Recursively convert Hydra 0.x configs to Hydra 1.x configs.
 
@@ -441,7 +471,9 @@ def maybe_update_config_version(cfg: 'DictConfig'):
         An updated DictConfig that conforms to Hydra 1.x format.
     """
     if not _HAS_HYDRA:
-        logging.error("This function requires Hydra/Omegaconf and it was not installed.")
+        logging.error(
+            "This function requires Hydra/Omegaconf and it was not installed."
+        )
         exit(1)
     if cfg is not None and not isinstance(cfg, DictConfig):
         try:
@@ -469,7 +501,7 @@ def import_class_by_path(path: str):
     """
     Recursive import of class by path string.
     """
-    paths = path.split('.')
+    paths = path.split(".")
     path = ".".join(paths[:-1])
     class_name = paths[-1]
     mod = __import__(path, fromlist=[class_name])
@@ -477,7 +509,7 @@ def import_class_by_path(path: str):
     return mod
 
 
-def resolve_subclass_pretrained_model_info(base_class) -> List['PretrainedModelInfo']:
+def resolve_subclass_pretrained_model_info(base_class) -> List["PretrainedModelInfo"]:
     """
     Recursively traverses the inheritance graph of subclasses to extract all pretrained model info.
     First constructs a set of unique pretrained model info by performing DFS over the inheritance graph.
@@ -516,7 +548,9 @@ def resolve_subclass_pretrained_model_info(base_class) -> List['PretrainedModelI
     return list_of_models
 
 
-def check_lib_version(lib_name: str, checked_version: str, operator) -> Tuple[Optional[bool], str]:
+def check_lib_version(
+    lib_name: str, checked_version: str, operator
+) -> Tuple[Optional[bool], str]:
     """
     Checks if a library is installed, and if it is, checks the operator(lib.__version__, checked_version) as a result.
     This bool result along with a string analysis of result is returned.
@@ -538,12 +572,12 @@ def check_lib_version(lib_name: str, checked_version: str, operator) -> Tuple[Op
         -   A string analysis of the check.
     """
     try:
-        if '.' in lib_name:
+        if "." in lib_name:
             mod = import_class_by_path(lib_name)
         else:
             mod = importlib.import_module(lib_name)
 
-        if hasattr(mod, '__version__'):
+        if hasattr(mod, "__version__"):
             lib_ver = version.Version(mod.__version__)
             match_ver = version.Version(checked_version)
 
@@ -571,7 +605,7 @@ def check_lib_version(lib_name: str, checked_version: str, operator) -> Tuple[Op
 
 def uninject_model_parallel_rank(filepath):
     filepath = str(filepath)
-    if 'mp_rank' in filepath or 'tp_rank' in filepath:
+    if "mp_rank" in filepath or "tp_rank" in filepath:
         dirname = os.path.dirname(os.path.dirname(filepath))
         basename = os.path.basename(filepath)
         filepath = os.path.join(dirname, basename)
@@ -593,10 +627,13 @@ def inject_model_parallel_rank(filepath):
         # filepath needs to be updated to include mp_rank
         dirname = os.path.dirname(filepath)
         basename = os.path.basename(filepath)
-        if app_state.pipeline_model_parallel_size is None or app_state.pipeline_model_parallel_size == 1:
-            filepath = f'{dirname}/mp_rank_{app_state.tensor_model_parallel_rank:02d}/{basename}'
+        if (
+            app_state.pipeline_model_parallel_size is None
+            or app_state.pipeline_model_parallel_size == 1
+        ):
+            filepath = f"{dirname}/mp_rank_{app_state.tensor_model_parallel_rank:02d}/{basename}"
         else:
-            filepath = f'{dirname}/tp_rank_{app_state.tensor_model_parallel_rank:02d}_pp_rank_{app_state.pipeline_model_parallel_rank:03d}/{basename}'
+            filepath = f"{dirname}/tp_rank_{app_state.tensor_model_parallel_rank:02d}_pp_rank_{app_state.pipeline_model_parallel_rank:03d}/{basename}"
         return filepath
     else:
         return filepath
