@@ -1,19 +1,18 @@
 import itertools
 import string
 from abc import ABC, abstractmethod
-from contextlib import contextmanager
+
+# from contextlib import contextmanager
 from typing import List, Optional
 
-from roar.collections.common.tokenizers.text_to_speech.ipa_lexicon import (
-    get_grapheme_character_set,
-    get_ipa_punctuation_list,
-    validate_locale,
-)
+# from roar.collections.common.tokenizers.text_to_speech.ipa_lexicon import (
+#     get_grapheme_character_set,
+#     get_ipa_punctuation_list,
+#     validate_locale,
+# )
 from roar.collections.common.tokenizers.text_to_speech.tokenizer_utils import (
     any_locale_text_preprocessing,
-    chinese_text_preprocessing,
     english_text_preprocessing,
-    spanish_text_preprocessing,
 )
 from roar.utils import logging
 from roar.utils.decorators import experimental
@@ -180,7 +179,7 @@ class IndicCharsTokenizer(BaseCharsTokenizer):
         pad_with_space=False,
         parse_chars_as_is=True,
         non_default_punct_list=None,
-        text_preprocessing_func=lambda x: x,
+        text_preprocessing_func=any_locale_text_preprocessing,
     ):
         """Base class for char-based tokenizer.
         Args:
