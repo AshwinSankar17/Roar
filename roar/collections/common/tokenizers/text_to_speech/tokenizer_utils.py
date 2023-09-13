@@ -41,6 +41,15 @@ _WORDS_RE_ANY_LOCALE = re.compile(
 )
 
 
+def get_characters_from_range(start_range, end_range):
+    start_range = ord(start_range)
+    end_range = ord(end_range)
+    characters_in_range = [
+        chr(char_code) for char_code in range(start_range, end_range + 1)
+    ]
+    return characters_in_range
+
+
 def english_text_preprocessing(text, lower=True):
     text = unicode(text)
     text = "".join(

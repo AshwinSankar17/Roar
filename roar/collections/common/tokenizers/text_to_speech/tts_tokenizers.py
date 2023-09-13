@@ -1,4 +1,3 @@
-import itertools
 import string
 from abc import ABC, abstractmethod
 
@@ -13,6 +12,7 @@ from typing import List, Optional
 from roar.collections.common.tokenizers.text_to_speech.tokenizer_utils import (
     any_locale_text_preprocessing,
     english_text_preprocessing,
+    get_characters_from_range,
 )
 from roar.utils import logging
 from roar.utils.decorators import experimental
@@ -104,7 +104,7 @@ class BaseCharsTokenizer(BaseTokenizer):
             punct: Whether to reserve grapheme for basic punctuation or not.
             apostrophe: Whether to use apostrophe or not.
             add_blank_at: Add blank to labels in the specified order ("last") or after tokens (any non None),
-             if None then no blank in labels.
+                if None then no blank in labels.
             pad_with_space: Whether to pad text with spaces at the beginning and at the end or not.
             non_default_punct_list: List of punctuation marks which will be used instead default.
             text_preprocessing_func: Text preprocessing function for correct execution of the tokenizer.
@@ -161,6 +161,7 @@ class BaseCharsTokenizer(BaseTokenizer):
 
 
 class IndicCharsTokenizer(BaseCharsTokenizer):
+    __name__ = "IndicCharsTokenizer"
     # fmt: off
     # TODO: unify definition of the default PUNCT_LIST and import from ipa_lexicon.py
     PUNCT_LIST = (  # Derived from LJSpeech and "/" additionally
@@ -172,34 +173,47 @@ class IndicCharsTokenizer(BaseCharsTokenizer):
 
     def __init__(
         self,
-        chars,
+        chars=None,
         punct=True,
         apostrophe=True,
         add_blank_at=None,
+        unicode_range=None,
         pad_with_space=False,
-        parse_chars_as_is=True,
         non_default_punct_list=None,
-        text_preprocessing_func=any_locale_text_preprocessing,
+        process_mixed_language_chars=True,
+        text_preprocessing_func=any_locale_text_preprocessing,  # TODO: Change this to have indic_nlp_resources' text normalization logic
     ):
         """Base class for char-based tokenizer.
         Args:
             chars: string that represents all possible characters.
+            unicode_range: Tuple of unicode range. Only 2 values allowed. Supercedes chars.
             punct: Whether to reserve grapheme for basic punctuation or not.
             apostrophe: Whether to use apostrophe or not.
             add_blank_at: Add blank to labels in the specified order ("last") or after tokens (any non None),
-             if None then no blank in labels.
-            parse_chars_as_is: Bypass the str.alnum() check as this only works for certain characters and add the char as is.
+                if None then no blank in labels.
             pad_with_space: Whether to pad text with spaces at the beginning and at the end or not.
             non_default_punct_list: List of punctuation marks which will be used instead default.
+            process_mixed_language_chars: Boolean flag indicating whether or not to process mixed language chars.
             text_preprocessing_func: Text preprocessing function for correct execution of the tokenizer.
         """
-        chars = [
-            c
-            for c in chars
-            if c not in string.punctuation
-            and c not in self.PUNCT_LIST
-            and c.isprintable()
-        ]
+        if chars is None and unicode_range is None:
+            raise ValueError("Either chars or unicode_range must be provided.")
+        if unicode_range:
+            self.in_unicode_range = lambda x: unicode_range[0] <= x <= unicode_range[1]
+            chars = get_characters_from_range(*unicode_range)
+        else:
+            self.in_unicode_range = lambda x: False
+            chars = [
+                c
+                for c in chars
+                if c not in string.punctuation
+                and c not in self.PUNCT_LIST
+                and c.isprintable()
+            ]
+        self.process_mixed_language_chars = process_mixed_language_chars
+        if self.process_mixed_language_chars:
+            chars.extend(string.ascii_lowercase)
+        chars.extend(map(str, range(10)))
         super().__init__(
             chars=chars,
             punct=punct,
@@ -209,7 +223,6 @@ class IndicCharsTokenizer(BaseCharsTokenizer):
             non_default_punct_list=non_default_punct_list,
             text_preprocessing_func=text_preprocessing_func,
         )
-        self.parse_chars_as_is = parse_chars_as_is
 
     def encode(self, text):
         """See base class."""
@@ -220,11 +233,14 @@ class IndicCharsTokenizer(BaseCharsTokenizer):
             # Add a whitespace if the current char is a whitespace while the previous char is not a whitespace.
             if c == space and len(cs) > 0 and cs[-1] != space:
                 cs.append(c)
-            # Add the current char that is an alphanumeric or an apostrophe.
-            elif (c.isalnum() or c == "'") and c in tokens:
+
+            elif (self.in_unicode_range(c) or c == "'" and c in tokens) or c.isdigit():
                 cs.append(c)
-            elif self.parse_chars_as_is and c in tokens:
-                cs.append(c)
+            elif (
+                self.process_mixed_language_chars
+                and c.lower() in string.ascii_lowercase  # for mixed-language chars
+            ):
+                cs.append(c.lower())
             # Add a punctuation that has a single char.
             elif (c in self.PUNCT_LIST) and self.punct:
                 cs.append(c)
@@ -243,6 +259,86 @@ class IndicCharsTokenizer(BaseCharsTokenizer):
             cs = [space] + cs + [space]
 
         return [self._token2id[p] for p in cs]
+
+
+class TamilCharsTokenizer(IndicCharsTokenizer):
+    __name__ = "TamilCharsTokenizer"
+    UNICODE_RANGE = ("\u0B80", "\u0BFF")
+
+    def __init__(
+        self,
+        punct=True,
+        apostrophe=True,
+        add_blank_at=None,
+        pad_with_space=False,
+        parse_chars_as_is=False,
+        non_default_punct_list=None,
+        process_mixed_language_chars=True,
+        text_preprocessing_func=any_locale_text_preprocessing,
+    ):
+        """Tamil char-based tokenizer.
+        Args:
+            punct: Whether to reserve grapheme for basic punctuation or not.
+            apostrophe: Whether to use apostrophe or not.
+            add_blank_at: Add blank to labels in the specified order ("last") or after tokens (any non None),
+                if None then no blank in labels.
+            pad_with_space: Whether to pad text with spaces at the beginning and at the end or not.
+            non_default_punct_list: List of punctuation marks which will be used instead default.
+            process_mixed_language_chars: Boolean flag indicating whether or not to process mixed language chars.
+            text_preprocessing_func: Text preprocessing function for correct execution of the tokenizer.
+                Basically, it replaces all non-unicode characters with unicode ones and apply lower() function.
+        """
+        super().__init__(
+            unicode_range=self.UNICODE_RANGE,
+            punct=punct,
+            apostrophe=apostrophe,
+            add_blank_at=add_blank_at,
+            pad_with_space=pad_with_space,
+            parse_chars_as_is=parse_chars_as_is,
+            non_default_punct_list=non_default_punct_list,
+            process_mixed_language_chars=process_mixed_language_chars,
+            text_preprocessing_func=text_preprocessing_func,
+        )
+
+
+class HindiCharsTokenizer(IndicCharsTokenizer):
+    __name__ = "HindiCharsTokenizer"
+    UNICODE_RANGE = ("\u0900", "\u097F")
+
+    def __init__(
+        self,
+        punct=True,
+        apostrophe=True,
+        add_blank_at=None,
+        pad_with_space=False,
+        parse_chars_as_is=False,
+        non_default_punct_list=None,
+        process_mixed_language_chars=True,
+        text_preprocessing_func=any_locale_text_preprocessing,
+    ):
+        """Hindi char-based tokenizer.
+        Args:
+            punct: Whether to reserve grapheme for basic punctuation or not.
+            apostrophe: Whether to use apostrophe or not.
+            add_blank_at: Add blank to labels in the specified order ("last") or after tokens (any non None),
+                if None then no blank in labels.
+            pad_with_space: Whether to pad text with spaces at the beginning and at the end or not.
+            non_default_punct_list: List of punctuation marks which will be used instead default.
+            process_mixed_language_chars: Boolean flag indicating whether or not to process mixed language chars.
+            text_preprocessing_func: Text preprocessing function for correct execution of the tokenizer.
+                Basically, it replaces all non-unicode characters with unicode ones and apply lower() function.
+        """
+        super().__init__(
+            unicode_range=self.UNICODE_RANGE,
+            punct=punct,
+            apostrophe=apostrophe,
+            add_blank_at=add_blank_at,
+            pad_with_space=pad_with_space,
+            parse_chars_as_is=parse_chars_as_is,
+            non_default_punct_list=non_default_punct_list,
+            process_mixed_language_chars=process_mixed_language_chars,
+            text_preprocessing_func=text_preprocessing_func,
+        )
 
 
 class EnglishCharsTokenizer(BaseCharsTokenizer):

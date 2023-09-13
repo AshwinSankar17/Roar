@@ -7,7 +7,7 @@ from roar.utils import logging
 from roar.utils.exp_manager import exp_manager
 
 
-@hydra_runner(config_path="conf", config_name="fastpitch_align_44100")
+@hydra_runner(config_path="conf/fastpitch", config_name="fastpitch_44100_align")
 def main(cfg):
     if hasattr(cfg.model.optim, "sched"):
         logging.warning(
