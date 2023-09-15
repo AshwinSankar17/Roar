@@ -10,6 +10,7 @@ from roar.collections.tts.modules.submodules import (
     LinearNorm,
 )
 from roar.collections.tts.modules.attention import MultiHeadAttn
+from roar.collections.tts.modules.postional_embedding import PositionalEmbedding
 from roar.collections.tts.parts.utils.helpers import get_mask_from_lengths
 from roar.core.classes import NeuralModule, adapter_mixins, typecheck
 from roar.core.neural_types.elements import (
@@ -21,33 +22,13 @@ from roar.core.neural_types.elements import (
 from roar.core.neural_types.neural_type import NeuralType
 
 
+# TODO: move mask_from_lens to roar.collections.tts.parts.utils.helpers
 def mask_from_lens(lens, max_len: Optional[int] = None):
     if max_len is None:
         max_len = lens.max()
     ids = torch.arange(0, max_len, device=lens.device, dtype=lens.dtype)
     mask = torch.lt(ids, lens.unsqueeze(1))
     return mask
-
-
-# Implements sinusoidal positional encoding
-class PositionalEmbedding(nn.Module):
-    def __init__(self, demb):
-        super(PositionalEmbedding, self).__init__()
-        self.demb = demb
-        inv_freq = 1 / (10000 ** (torch.arange(0.0, demb, 2.0) / demb))
-        self.register_buffer("inv_freq", inv_freq)
-
-    def forward(self, pos_seq, bsz=None):
-        #        sinusoid_inp = torch.ger(pos_seq, self.inv_freq)
-        sinusoid_inp = torch.matmul(
-            torch.unsqueeze(pos_seq, -1), torch.unsqueeze(self.inv_freq, 0)
-        )
-
-        pos_emb = torch.cat([sinusoid_inp.sin(), sinusoid_inp.cos()], dim=1)
-        if bsz is not None:
-            return pos_emb[None, :, :].repeat(bsz, 1, 1)
-        else:
-            return pos_emb[None, :, :]
 
 
 class PositionwiseConvFF(nn.Module):
@@ -118,7 +99,7 @@ class TransformerLayer(nn.Module, adapter_mixins.AdapterModuleMixin):
         dropout,
         condition_types=[],
         **kwargs
-    ):
+    ):  # TODO: add flash attention support for transformer
         super(TransformerLayer, self).__init__()
 
         self.dec_attn = MultiHeadAttn(
