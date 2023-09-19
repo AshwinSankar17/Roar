@@ -54,8 +54,8 @@ A more in-depth tutorial will be added soon.
 - [x] One TTS Alignment
 - [x] Fastpitch
 - [x] HiFi-GAN
+- [x] ConformerLayer
 - [ ] Sparse Attention
-- [ ] ConformerLayer
 - [ ] WaveGrad
 - [ ] GlowTTS
 - [ ] FastDiff
