@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Tuple, Union
 
 import torch
 
-from roar.core.classes.mixins import AccessMixin, AdapterModuleMixin
+from roar.core.classes.mixins import AccessMixin
 
 
 class AbstractAdapterStrategy(ABC):
