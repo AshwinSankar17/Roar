@@ -1,4 +1,4 @@
-from nemo.collections.common.data.dataset import (
+from roar.collections.common.data.dataset import (
     CodeSwitchedDataset,
     ConcatDataset,
     ConcatMapDataset,

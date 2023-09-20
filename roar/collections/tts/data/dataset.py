@@ -20,7 +20,6 @@ from roar.collections.tts.parts.preprocessing.segment import AudioSegment
 from roar.collections.common.tokenizers.text_to_speech.tts_tokenizers import (
     BaseTokenizer,
     EnglishCharsTokenizer,
-    EnglishPhonemesTokenizer,
 )
 from roar.collections.tts.parts.utils.tts_dataset_utils import (
     BetaBinomialInterpolator,
