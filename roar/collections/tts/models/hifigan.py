@@ -27,7 +27,7 @@ from roar.core.classes import Exportable
 from roar.core.classes.common import PretrainedModelInfo, typecheck
 from roar.core.neural_types.elements import AudioSignal, MelSpectrogramType
 from roar.core.neural_types.neural_type import NeuralType
-from roar.core.optim.lr_scheduler import compute_max_steps, prepare_lr_scheduler
+from roar.core.optim.lr_schedulers import compute_max_steps, prepare_lr_scheduler
 from roar.utils import logging, model_utils
 
 HAVE_WANDB = True

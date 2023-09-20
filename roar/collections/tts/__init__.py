@@ -1,4 +1,4 @@
-from roar.collections.tts import data, losses, models, modules
+from roar.collections.tts import data, losses, models, modules, parts
 from roar.package_info import __version__
 
 __version__ = __version__

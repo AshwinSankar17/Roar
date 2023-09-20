@@ -12,12 +12,11 @@ import numpy as np
 import soundfile as sf
 from scipy import signal
 
-from roar.collections.tts.parts.preprocessing.segment import AudioSegment
+from roar.collections.asr.parts.preprocessing.segment import AudioSegment
 from roar.collections.common.parts.preprocessing import collections, parsers
 from roar.core.classes import IterableDataset
 from roar.utils import logging
 
-# TODO @blisc: Perhaps refactor instead of import guarding
 HAVE_OMEGACONG_WEBDATASET = True
 try:
     import webdataset as wd

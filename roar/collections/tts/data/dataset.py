@@ -13,8 +13,8 @@ import torch
 from einops import rearrange
 from tqdm import tqdm
 
-from roar.collections.tts.parts.preprocessing.features import WaveformFeaturizer
-from roar.collections.tts.parts.preprocessing.segment import AudioSegment
+from roar.collections.asr.parts.preprocessing.features import WaveformFeaturizer
+from roar.collections.asr.parts.preprocessing.segment import AudioSegment
 
 # TODO: Implement fresh set of Indic Tokenizers for CLS, Character, Syllable and IPA
 from roar.collections.common.tokenizers.text_to_speech.tts_tokenizers import (
