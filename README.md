@@ -54,9 +54,14 @@ A more in-depth tutorial will be added soon.
 - [x] One TTS Alignment
 - [x] Fastpitch
 - [x] HiFi-GAN
+- [x] ConformerLayer
+- [ ] Relative Position Embeddings
+- [ ] Rotary Position Embeddings
 - [ ] Sparse Attention
-- [ ] ConformerLayer
 - [ ] WaveGrad
 - [ ] GlowTTS
 - [ ] FastDiff
 - [ ] WaveNet
+
+---
+**Disclaimer**: All the code in this repository, forked from NeMo, follows the licensing of the original NeMo repository. The code is provided as-is for research purposes only and without any guarantees. Please contact the original authors for any commercial use.

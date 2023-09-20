@@ -170,7 +170,7 @@ class ConformerLayer(
     """A single block of the Conformer encoder.
 
     Args:
-        n_heads (int): number of heads for multi-head attention
+        n_head (int): number of heads for multi-head attention
         conv_kernel_size (int): kernel size for depthwise convolution in convolution module
         dropout (float): dropout probabilities for linear layers
         dropout_att (float): dropout probabilities for attention distributions
