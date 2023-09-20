@@ -6,7 +6,6 @@ from roar.core.config.optimizers import (
     AdamaxParams,
     AdamParams,
     AdamWParams,
-    NovogradParams,
     OptimizerParams,
     RMSpropParams,
     RpropParams,
@@ -16,7 +15,7 @@ from roar.core.config.optimizers import (
 )
 from roar.core.config.pytorch import DataLoaderConfig
 from roar.core.config.pytorch_lightning import TrainerConfig
-from roar.core.config.schedulers import (
+from roar.core.config.lr_schedulers import (
     CosineAnnealingParams,
     InverseSquareRootAnnealingParams,
     NoamAnnealingParams,
