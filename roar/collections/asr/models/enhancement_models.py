@@ -15,7 +15,7 @@ from roar.collections.asr.data.audio_to_text_dataset import (
     inject_dataloader_value_from_model_config,
 )
 from roar.collections.asr.models.audio_to_audio_model import AudioToAudioModel
-from roar.collections.tts.parts.utils.audio_utils import ChannelSelectorType
+from roar.collections.asr.parts.utils.audio_utils import ChannelSelectorType
 from roar.core.classes.common import PretrainedModelInfo, typecheck
 from roar.core.neural_types import AudioSignal, LengthsType, NeuralType
 from roar.utils import logging

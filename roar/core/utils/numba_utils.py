@@ -5,7 +5,7 @@ import os
 
 from typing import Tuple, Union
 
-from nemo.utils import model_utils
+from roar.utils import model_utils
 
 # Prevent Numba CUDA logs from showing at info level
 cuda_logger = pylogger.getLogger("numba.cuda.cudadrv.driver")

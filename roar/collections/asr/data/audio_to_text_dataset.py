@@ -11,7 +11,7 @@ from pytorch_lightning.callbacks import BasePredictionWriter
 from torch.utils.data import ChainDataset
 
 from roar.collections.asr.data import audio_to_text, audio_to_text_dali
-from roar.collections.asr.parts.preprocessing.pertub import process_augmentations
+from roar.collections.asr.parts.preprocessing.perturb import process_augmentations
 from roar.collections.common.data.dataset import CodeSwitchedDataset, ConcatDataset
 from roar.utils import logging
 

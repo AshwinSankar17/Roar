@@ -12,8 +12,8 @@ import webdataset as wd
 from torch.utils.data import ChainDataset
 from tqdm import tqdm
 
-from roar.collections.tts.parts.preprocessing.features import WaveformFeaturizer
-from roar.collections.tts.parts.utils.audio_utils import ChannelSelectorType
+from roar.collections.asr.parts.preprocessing.features import WaveformFeaturizer
+from roar.collections.asr.parts.utils.audio_utils import ChannelSelectorType
 from roar.collections.common import tokenizers
 from roar.collections.common.parts.preprocessing import collections, parsers
 from roar.core.classes import Dataset, IterableDataset

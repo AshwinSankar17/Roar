@@ -7,11 +7,11 @@ from typing import Any, Dict, Optional, Tuple
 import torch
 from packaging import version
 
-from roar.collections.tts.parts.numba.spec_augment import (
+from roar.collections.asr.parts.numba.spec_augment import (
     SpecAugmentNumba,
     spec_augment_launch_heuristics,
 )
-from roar.collections.tts.parts.preprocessing.features import (
+from roar.collections.asr.parts.preprocessing.features import (
     FilterbankFeatures,
     FilterbankFeaturesTA,
     make_seq_mask_like,
