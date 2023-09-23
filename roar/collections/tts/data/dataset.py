@@ -19,7 +19,9 @@ from roar.collections.asr.parts.preprocessing.segment import AudioSegment
 # TODO: Implement fresh set of Indic Tokenizers for CLS, Character, Syllable and IPA
 from roar.collections.common.tokenizers.text_to_speech.tts_tokenizers import (
     BaseTokenizer,
-    EnglishCharsTokenizer,
+    BaseCharsTokenizer,
+    IndicCharsTokenizer,
+    TamilCharsTokenizer,
 )
 from roar.collections.tts.parts.utils.tts_dataset_utils import (
     BetaBinomialInterpolator,
@@ -1047,8 +1049,8 @@ class MixerTTSXDataset(TTSDataset):
             normalized_text = d["normalized_text"]
 
             assert isinstance(
-                self.text_tokenizer, EnglishPhonemesTokenizer
-            ) or isinstance(self.text_tokenizer, EnglishCharsTokenizer)
+                self.text_tokenizer, BaseCharsTokenizer
+            ) or isinstance(self.text_tokenizer, IndicCharsTokenizer)
             preprocess_text_as_tts_input = self.text_tokenizer.text_preprocessing_func(
                 normalized_text
             )

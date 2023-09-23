@@ -167,7 +167,8 @@ class IndicCharsTokenizer(BaseCharsTokenizer):
     PUNCT_LIST = (  # Derived from LJSpeech and "/" additionally
         ',', '.', '!', '?', '-',
         ':', ';', '/', '"', '(',
-        ')', '[', ']', '{', '}',
+        ')', '[', ']', '{', '}', 
+        '%', '$', '#',
     )
     # fmt: on
 
@@ -271,7 +272,6 @@ class TamilCharsTokenizer(IndicCharsTokenizer):
         apostrophe=True,
         add_blank_at=None,
         pad_with_space=False,
-        parse_chars_as_is=False,
         non_default_punct_list=None,
         process_mixed_language_chars=True,
         text_preprocessing_func=any_locale_text_preprocessing,
@@ -294,7 +294,6 @@ class TamilCharsTokenizer(IndicCharsTokenizer):
             apostrophe=apostrophe,
             add_blank_at=add_blank_at,
             pad_with_space=pad_with_space,
-            parse_chars_as_is=parse_chars_as_is,
             non_default_punct_list=non_default_punct_list,
             process_mixed_language_chars=process_mixed_language_chars,
             text_preprocessing_func=text_preprocessing_func,
@@ -311,7 +310,6 @@ class HindiCharsTokenizer(IndicCharsTokenizer):
         apostrophe=True,
         add_blank_at=None,
         pad_with_space=False,
-        parse_chars_as_is=False,
         non_default_punct_list=None,
         process_mixed_language_chars=True,
         text_preprocessing_func=any_locale_text_preprocessing,
@@ -334,7 +332,6 @@ class HindiCharsTokenizer(IndicCharsTokenizer):
             apostrophe=apostrophe,
             add_blank_at=add_blank_at,
             pad_with_space=pad_with_space,
-            parse_chars_as_is=parse_chars_as_is,
             non_default_punct_list=non_default_punct_list,
             process_mixed_language_chars=process_mixed_language_chars,
             text_preprocessing_func=text_preprocessing_func,

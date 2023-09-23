@@ -61,6 +61,7 @@ CFG_NAME2FUNC = {
 
 @hydra_runner(config_path="indictts/ds_conf", config_name="ds_for_fastpitch_align")
 def main(cfg):
+    print(cfg.dataset)
     dataset = instantiate(cfg.dataset)
     dataloader = torch.utils.data.DataLoader(
         dataset=dataset,

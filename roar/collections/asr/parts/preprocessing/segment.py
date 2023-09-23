@@ -7,7 +7,7 @@ import librosa
 import numpy as np
 import soundfile as sf
 
-from roar.collections.tts.parts.utils.audio_utils import select_channels
+from roar.collections.asr.parts.utils.audio_utils import select_channels
 from roar.utils import logging
 
 # TODO: Perhaps refactor instead of import guarding

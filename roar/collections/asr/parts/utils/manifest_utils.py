@@ -8,7 +8,7 @@ from typing import Dict, List, Union
 import librosa
 import numpy as np
 
-from roar.collections.tts.parts.utils.speaker_utils import (
+from roar.collections.asr.parts.utils.speaker_utils import (
     audio_rttm_map,
     get_subsegments,
     get_uniqname_from_filepath,
