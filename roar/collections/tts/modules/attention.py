@@ -20,11 +20,13 @@ from roar.core.neural_types.elements import (
     TokenIndex,
 )
 from roar.core.neural_types.neural_type import NeuralType
+from roar.utils import logging
 
-# Attention Configs
-Config = namedtuple(
-    "AttentionTypes", ["enable_flash", "enable_math", "enable_mem_efficient"]
-)
+HAVE_FLASH = True
+try:
+    from flash_attn import flash_attn_qkvpacked_func
+except ImportError:
+    HAVE_FLASH = False
 
 
 # Multi Head Self Attention, may use flash attention or memory efficient attention
@@ -38,9 +40,6 @@ class MultiHeadAttn(nn.Module):
         dropatt=0.1,
         pre_lnorm=False,
         condition_types=[],
-        attention_config: Config = Config(
-            False, True, False
-        ),  # Enables the pytorch implementation of attention in c++
     ):
         super(MultiHeadAttn, self).__init__()
 
@@ -49,11 +48,6 @@ class MultiHeadAttn(nn.Module):
         self.d_head = d_head
         self.scale = 1 / (d_head**0.5)
         self.pre_lnorm = pre_lnorm
-
-        assert (
-            len(set(filter(bool, attention_config))) == 1
-        ), "Only one attention type can be enabled at a time"  # Can only use flash or math or mem_efficient attention
-        self.attention_config = attention_config
 
         self.qkv_net = nn.Linear(d_model, 3 * n_head * d_head)
         self.drop = nn.Dropout(dropout)
@@ -88,8 +82,74 @@ class MultiHeadAttn(nn.Module):
             attn_mask = attn_mask.unsqueeze(1).to(q.dtype)  # [B, 1, T]
             attn_mask = attn_mask.repeat(n_head, attn_mask.size(2), 1)
 
-        with torch.backends.cuda.sdp_kernel(**self.attention_config._asdict()):
-            attn_vec = F.scaled_dot_product_attention(q, k, v, attn_mask, self.dropatt)
+        attn_vec = F.scaled_dot_product_attention(q, k, v, attn_mask, self.dropatt)
+
+        attn_vec = attn_vec.view(n_head, inp.size(0), inp.size(1), d_head)
+        attn_vec = (
+            attn_vec.permute(1, 2, 0, 3)
+            .contiguous()
+            .view(inp.size(0), inp.size(1), n_head * d_head)
+        )
+
+        # linear projection
+        attn_out = self.o_net(attn_vec)
+        attn_out = self.drop(attn_out)
+
+        if self.pre_lnorm:
+            # residual connection
+            output = residual + attn_out
+        else:
+            # residual connection + layer normalization
+            output = self.layer_norm(residual + attn_out, conditioning)
+
+        return output
+
+
+class MultiHeadAttnFlash(nn.Module):
+    def __init__(
+        self,
+        n_head,
+        d_model,
+        d_head,
+        dropout,
+        dropatt=0.1,
+        pre_lnorm=False,
+        condition_types=[],
+    ):
+        super(MultiHeadAttn, self).__init__()
+
+        self.n_head = n_head
+        self.d_model = d_model
+        self.d_head = d_head
+        self.scale = 1 / (d_head**0.5)
+        self.pre_lnorm = pre_lnorm
+
+        self.qkv_net = nn.Linear(d_model, 3 * n_head * d_head)
+        self.drop = nn.Dropout(dropout)
+        self.dropatt = dropatt
+        self.o_net = nn.Linear(n_head * d_head, d_model, bias=False)
+        self.layer_norm = ConditionalLayerNorm(
+            d_model, condition_dim=d_model, condition_types=condition_types
+        )
+
+    def forward(self, inp, attn_mask=None, conditioning=None):
+        if attn_mask:
+            logging.warning(
+                "Attention mask is not supported for flash attention. Not using the mask for now."
+            )
+        return self._forward(inp, conditioning)
+
+    def _forward(self, inp, conditioning=None):
+        residual = inp
+        if self.pre_lnorm:
+            # layer normalization
+            inp = self.layer_norm(inp, conditioning)
+
+        n_head, d_head = self.n_head, self.d_head
+        qkv = self.qkv_net(inp)
+        qkv = qkv.view(inp.size(0), inp.size(1), 3, n_head, d_head)
+
+        attn_vec = flash_attn_qkvpacked_func(qkv, self.dropatt)
 
         attn_vec = attn_vec.view(n_head, inp.size(0), inp.size(1), d_head)
         attn_vec = (
