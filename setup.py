@@ -148,7 +148,6 @@ setuptools.setup(
     ],
     packages=setuptools.find_packages(),
     install_requires=install_requires,
-    dependency_links=["https://download.pytorch.org/whl/cu118"],
     python_requires=">=3.10",
     include_package_data=True,
     exclude=["tools", "tests"],
