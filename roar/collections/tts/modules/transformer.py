@@ -9,7 +9,7 @@ from roar.collections.tts.modules.submodules import (
     ConditionalLayerNorm,
     LinearNorm,
 )
-from roar.collections.tts.modules.attention import MultiHeadAttn
+from roar.collections.tts.modules.attention import MultiHeadAttn, MultiHeadAttnFlash
 from roar.collections.tts.modules.postional_embedding import PositionalEmbedding
 from roar.collections.tts.parts.utils.helpers import get_mask_from_lengths
 from roar.core.classes import NeuralModule, adapter_mixins, typecheck
@@ -20,6 +20,14 @@ from roar.core.neural_types.elements import (
     TokenIndex,
 )
 from roar.core.neural_types.neural_type import NeuralType
+from roar.utils.gpu_utils import is_gpu_ampere_or_newer
+from roar.utils import logging
+
+HAVE_FLASH = True
+try:
+    from flash_attn import flash_attn_qkvpacked_func
+except ImportError:
+    HAVE_FLASH = False
 
 
 # TODO: move mask_from_lens to roar.collections.tts.parts.utils.helpers
@@ -101,8 +109,20 @@ class TransformerLayer(nn.Module, adapter_mixins.AdapterModuleMixin):
         **kwargs
     ):  # TODO: add flash attention support for transformer
         super(TransformerLayer, self).__init__()
+        AttentionBlock = MultiHeadAttn
+        if kwargs.get("use_flash", False):
+            if not HAVE_FLASH:
+                logging.warning(
+                    "Flash attention is not available. Falling back to regular attn."
+                )
+            elif not is_gpu_ampere_or_newer():
+                logging.warning(
+                    "Flash attention is only available on Ampere or newer GPUs. Falling back to regular attn."
+                )
+            else:
+                AttentionBlock = MultiHeadAttnFlash
 
-        self.dec_attn = MultiHeadAttn(
+        self.dec_attn = AttentionBlock(
             n_head, d_model, d_head, dropout, condition_types=condition_types, **kwargs
         )
         self.pos_ff = PositionwiseConvFF(
@@ -143,6 +163,7 @@ class FFTransformerDecoder(NeuralModule):
         dropemb=0.0,
         pre_lnorm=False,
         condition_types=[],
+        use_flash=False,
     ):
         super(FFTransformerDecoder, self).__init__()
         self.d_model = d_model
@@ -221,6 +242,7 @@ class FFTransformerEncoder(FFTransformerDecoder):
         d_embed=None,
         padding_idx=0,
         condition_types=[],
+        use_flash=False,
     ):
         super(FFTransformerEncoder, self).__init__(
             n_layer,
@@ -234,6 +256,7 @@ class FFTransformerEncoder(FFTransformerDecoder):
             dropemb,
             pre_lnorm,
             condition_types,
+            use_flash,
         )
 
         self.padding_idx = padding_idx
@@ -269,6 +292,7 @@ class FFTransformer(nn.Module):
         dropout=0.1,
         dropatt=0.1,
         dropemb=0.0,
+        use_flash=False,
     ):
         super(FFTransformer, self).__init__()
         self.in_dim = in_dim
@@ -290,6 +314,7 @@ class FFTransformer(nn.Module):
                     kernel_size,
                     dropout,
                     dropatt=dropatt,
+                    use_flash=use_flash,
                 )
             )
 
