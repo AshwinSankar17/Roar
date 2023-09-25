@@ -187,6 +187,7 @@ class FFTransformerDecoder(NeuralModule):
                     dropatt=dropatt,
                     pre_lnorm=pre_lnorm,
                     condition_types=condition_types,
+                    use_flash=use_flash,
                 )
             )
 
