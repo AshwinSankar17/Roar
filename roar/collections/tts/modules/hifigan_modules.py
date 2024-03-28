@@ -1,4 +1,5 @@
 import torch
+import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn import AvgPool1d, Conv1d, Conv2d, ConvTranspose1d
@@ -177,7 +178,7 @@ class Generator(NeuralModule):
         super().__init__()
         self.num_kernels = len(resblock_kernel_sizes)
         self.num_upsamples = len(upsample_rates)
-        self.upsample_factor = torch.prod(upsample_rates).item()
+        self.upsample_factor = np.prod(list(upsample_rates))
         self.conv_pre = weight_norm(
             Conv1d(initial_input_size, upsample_initial_channel, 7, 1, padding=3)
         )

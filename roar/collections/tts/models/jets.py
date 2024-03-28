@@ -40,6 +40,8 @@ from roar.collections.tts.parts.utils.helpers import (
     process_batch,
     sample_tts_input,
     get_segments,
+    get_batch_size,
+    get_num_workers,
 )
 from roar.core.classes import Exportable
 from roar.core.classes.common import PretrainedModelInfo, typecheck
@@ -48,6 +50,7 @@ from roar.core.neural_types.elements import (
     Index,
     LengthsType,
     MelSpectrogramType,
+    AudioSignal,
     ProbsType,
     RegressionValuesType,
     TokenDurationType,
@@ -83,7 +86,7 @@ class TextTokenizerConfig:
     text_tokenizer: TextTokenizer = TextTokenizer()
 
 
-class JETSModel(TextToWaveform, Exportable, FastPitchAdapterModelMixin):
+class JETSModel(TextToWaveform, Exportable):
     """JETS model that is used to generate audio from text."""
 
     def __init__(self, cfg: DictConfig, trainer: Trainer = None):
@@ -177,7 +180,7 @@ class JETSModel(TextToWaveform, Exportable, FastPitchAdapterModelMixin):
             output_fft.cond_input.condition_types.append("add")
         if speaker_emb_condition_aligner and self.aligner is not None:
             self.aligner.cond_input.condition_types.append("add")
-
+        self.segment_size = cfg.segment_size
         self.jets = JETSModule(
             input_fft,
             output_fft,
@@ -207,9 +210,40 @@ class JETSModel(TextToWaveform, Exportable, FastPitchAdapterModelMixin):
             self.export_config["num_speakers"] = cfg.n_speakers
 
         self.log_config = cfg.get("log_config", None)
-
+        self.automatic_optimization = False
         # Adapter modules setup (from FastPitchAdapterModelMixin)
-        self.setup_adapters()
+        # self.setup_adapters()
+    
+    @property
+    def max_steps(self):
+        if "max_steps" in self._cfg:
+            return self._cfg.get("max_steps")
+
+        if "max_epochs" not in self._cfg:
+            raise ValueError("Must specify 'max_steps' or 'max_epochs'.")
+
+        if "steps_per_epoch" in self._cfg:
+            return self._cfg.max_epochs * self._cfg.steps_per_epoch
+
+        return compute_max_steps(
+            max_epochs=self._cfg.max_epochs,
+            accumulate_grad_batches=self.trainer.accumulate_grad_batches,
+            limit_train_batches=self.trainer.limit_train_batches,
+            num_workers=get_num_workers(self.trainer),
+            num_samples=len(self._train_dl.dataset),
+            batch_size=get_batch_size(self._train_dl),
+            drop_last=self._train_dl.drop_last,
+        )
+
+    @staticmethod
+    def get_warmup_steps(max_steps, warmup_steps, warmup_ratio):
+        if warmup_steps is not None:
+            return warmup_steps
+
+        if warmup_ratio is not None:
+            return warmup_ratio * max_steps
+
+        return None
 
     def _get_default_text_tokenizer_conf(self):
         text_tokenizer: TextTokenizerConfig = TextTokenizerConfig()
@@ -439,33 +473,34 @@ class JETSModel(TextToWaveform, Exportable, FastPitchAdapterModelMixin):
         )
 
     # TODO: Write convert_text_to_waveform method
-    # @typecheck(
-    #     output_types={"spect": NeuralType(("B", "D", "T_spec"), MelSpectrogramType())}
-    # )
-    # def generate_spectrogram(
-    #     self,
-    #     tokens: "torch.tensor",
-    #     speaker: Optional[int] = None,
-    #     pace: float = 1.0,
-    #     reference_spec: Optional["torch.tensor"] = None,
-    #     reference_spec_lens: Optional["torch.tensor"] = None,
-    # ) -> torch.tensor:
-    #     if self.training:
-    #         logging.warning(
-    #             "generate_spectrogram() is meant to be called in eval mode."
-    #         )
-    #     if isinstance(speaker, int):
-    #         speaker = torch.tensor([speaker]).to(self.device)
-    #     spect, *_ = self(
-    #         text=tokens,
-    #         durs=None,
-    #         pitch=None,
-    #         speaker=speaker,
-    #         pace=pace,
-    #         reference_spec=reference_spec,
-    #         reference_spec_lens=reference_spec_lens,
-    #     )
-    #     return spect
+    @typecheck(
+        output_types={"spect": NeuralType(("B", "T"), AudioSignal())}
+    )
+    def convert_text_to_waveform(
+        self,
+        tokens: "torch.tensor",
+        speaker: Optional[int] = None,
+        energy: "Optional[torch.tensor]" = None,
+        pace: float = 1.0,
+        reference_spec: Optional["torch.tensor"] = None,
+        reference_spec_lens: Optional["torch.tensor"] = None,
+    ) -> torch.tensor:
+        if self.training:
+            logging.warning(
+                "convert_text_to_waveform() is meant to be called in eval mode."
+            )
+        if isinstance(speaker, int):
+            speaker = torch.tensor([speaker]).to(self.device)
+        wav, *_ = self.jets.infer(
+            text=tokens,
+            pitch=None,
+            speaker=speaker,
+            energy=energy,
+            pace=pace,
+            reference_spec=reference_spec,
+            reference_spec_lens=reference_spec_lens,
+        )
+        return wav
 
     def training_step(self, batch, batch_idx):
         attn_prior, durs, speaker, energy, reference_audio, reference_audio_len = (
@@ -540,7 +575,7 @@ class JETSModel(TextToWaveform, Exportable, FastPitchAdapterModelMixin):
             durs = attn_hard_dur
 
         audio_ = get_segments(  # get ground truth audio segment
-            x=audio,
+            x=audio.unsqueeze(1),
             start_idxs=z_start_idxs * self.jets.waveform_generator.upsample_factor,
             segment_size=self.jets.waveform_generator.upsample_factor
             * self.segment_size,
@@ -566,12 +601,12 @@ class JETSModel(TextToWaveform, Exportable, FastPitchAdapterModelMixin):
 
         # Train Generator
         mels_y, _ = self.preprocessor(  # get mel spectrogram for the audio segment
-            input_signal=audio_,
-            length=self.jets.segment_size,
+            input_signal=audio_.squeeze(1),
+            length=audio_lens,
         )
         mels_pred, _ = self.preprocessor(  # get mel spectrogram for predicted audio
-            input_signal=wavs_pred,
-            length=self.jets.segment_size,
+            input_signal=wavs_pred.squeeze(1),
+            length=audio_lens,
         )
 
         mel_loss = self.mel_loss_fn(spect_predicted=mels_pred, spect_tgt=mels_y)
@@ -754,18 +789,18 @@ class JETSModel(TextToWaveform, Exportable, FastPitchAdapterModelMixin):
             durs = attn_hard_dur
 
         audio_ = get_segments(  # get ground truth audio segment
-            x=audio,
+            x=audio.unsqueeze(1),
             start_idxs=z_start_idxs * self.jets.waveform_generator.upsample_factor,
             segment_size=self.jets.waveform_generator.upsample_factor
             * self.segment_size,
         )
         mels_y, _ = self.preprocessor(  # get mel spectrogram for the audio segment
-            input_signal=audio_,
-            length=self.jets.segment_size,
+            input_signal=audio_.squeeze(1),
+            length=audio_lens,
         )
         mels_pred, _ = self.preprocessor(  # get mel spectrogram for predicted audio
-            input_signal=wavs_pred,
-            length=self.jets.segment_size,
+            input_signal=wavs_pred.squeeze(1),
+            length=audio_lens,
         )
 
         mel_loss = self.mel_loss_fn(spect_predicted=mels_pred, spect_tgt=mels_y)

@@ -40,6 +40,7 @@ class MultiHeadAttn(nn.Module):
         dropatt=0.1,
         pre_lnorm=False,
         condition_types=[],
+        **kwargs
     ):
         super(MultiHeadAttn, self).__init__()
 
