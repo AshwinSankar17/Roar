@@ -1,4 +1,4 @@
-_target_: nemo.collections.tts.modules.hifigan_modules.Generator
+_target_: roar.collections.tts.modules.hifigan_modules.Generator
 resblock: 1
 upsample_rates: [8,8,2,2]
 upsample_kernel_sizes: [16,16,4,4]

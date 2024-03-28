@@ -2,7 +2,7 @@
 # If you want to train model on other dataset, you can change config values according to your dataset.
 # Most dataset-specific arguments are in the head of the config file, see below.
 
-name: FastPitch
+name: IndicRasa/JETS
 
 train_dataset: ???
 validation_datasets: ???
@@ -35,6 +35,7 @@ model:
   max_token_duration: 75
   symbols_embedding_dim: 384
   pitch_embedding_kernel_size: 3
+  segment_size: 64
     
   pitch_fmin: ${pitch_fmin}
   pitch_fmax: ${pitch_fmax}
@@ -207,17 +208,18 @@ model:
       n_speakers: ???
       embedding_dim: ${model.symbols_embedding_dim}
 
-  generator:
-    _target_: nemo.collections.tts.modules.hifigan_modules.Generator
+  waveform_generator:
+    _target_: roar.collections.tts.modules.hifigan_modules.Generator
     resblock: 1
     upsample_rates: [8,8,2,2]
     upsample_kernel_sizes: [16,16,4,4]
     upsample_initial_channel: 512
     resblock_kernel_sizes: [3,7,11]
     resblock_dilation_sizes: [[1,3,5], [1,3,5], [1,3,5]]
+    initial_input_size: 384
 
   optim:
-    name: adamw
+    _target_: torch.optim.AdamW
     lr: 1e-3
     betas: [0.9, 0.999]
     weight_decay: 1e-6
@@ -227,6 +229,8 @@ model:
       warmup_steps: 1000
       last_epoch: -1
       d_model: 1  # Disable scaling based on model 
+  
+  max_epochs: 1500
 
 trainer:
   num_nodes: 1
@@ -234,9 +238,8 @@ trainer:
   accelerator: gpu
   strategy: ddp
   precision: 'bf16-mixed'
-  max_epochs: 1000
+  max_epochs: ${model.max_epochs}
   accumulate_grad_batches: 1
-  gradient_clip_val: 1000.0
   enable_checkpointing: false # Provided by exp_manager
   logger: false # Provided by exp_manager
   log_every_n_steps: 100

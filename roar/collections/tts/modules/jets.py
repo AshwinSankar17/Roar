@@ -249,7 +249,7 @@ class JETSModule(NeuralModule, adapter_mixins.AdapterModuleMixin):
     @property
     def output_types(self):
         return {
-            "spect": NeuralType(("B", "S", "T"), AudioSignal()),
+            "wav": NeuralType(("B", "S", "T"), AudioSignal()),
             "num_frames": NeuralType(("B"), TokenDurationType()),
             "durs_predicted": NeuralType(("B", "T_text"), TokenDurationType()),
             "log_durs_predicted": NeuralType(("B", "T_text"), TokenLogDurationType()),
@@ -261,6 +261,7 @@ class JETSModule(NeuralModule, adapter_mixins.AdapterModuleMixin):
             "pitch": NeuralType(("B", "T_audio"), RegressionValuesType()),
             "energy_pred": NeuralType(("B", "T_text"), RegressionValuesType()),
             "energy_tgt": NeuralType(("B", "T_audio"), RegressionValuesType()),
+            "z_start_idxs": NeuralType(("B"), Index())
         }
 
     def get_speaker_embedding(
@@ -400,7 +401,7 @@ class JETSModule(NeuralModule, adapter_mixins.AdapterModuleMixin):
                 dec_out.transpose(1, 2), mel_lens, self.segment_size
             )
         )
-        wav = self.waveform_generator(z_segments)
+        wav = self.waveform_generator(x=z_segments)
         # spect = self.proj(dec_out).transpose(1, 2)
         return (
             wav,
