@@ -15,13 +15,13 @@ from roar.collections.tts.losses.aligner_loss import BinLoss, ForwardSumLoss
 from roar.collections.tts.losses.fastpitchloss import (
     DurationLoss,
     EnergyLoss,
-    MelLoss,
     PitchLoss,
 )
 from roar.collections.tts.losses.hifigan_losses import (
     FeatureMatchingLoss,
     GeneratorLoss,
     DiscriminatorLoss,
+    MelLoss,
 )
 from roar.collections.tts.models.base import TextToWaveform
 from roar.collections.tts.modules.hifigan_modules import (
@@ -29,7 +29,8 @@ from roar.collections.tts.modules.hifigan_modules import (
     MultiScaleDiscriminator,
 )
 from roar.collections.tts.modules.jets import JETSModule
-from roar.collections.tts.parts.mixins import FastPitchAdapterModelMixin
+
+# from roar.collections.tts.parts.mixins import FastPitchAdapterModelMixin
 from roar.collections.tts.parts.utils.callbacks import LoggingCallback
 from roar.collections.tts.parts.utils.helpers import (
     batch_from_ragged,
