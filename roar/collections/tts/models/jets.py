@@ -10,19 +10,18 @@ from omegaconf import DictConfig, OmegaConf, open_dict
 from pytorch_lightning import Trainer
 from pytorch_lightning.loggers import TensorBoardLogger
 
-# TODO: resolve import errors
 from roar.collections.common.parts.preprocessing import parsers
 from roar.collections.tts.losses.aligner_loss import BinLoss, ForwardSumLoss
 from roar.collections.tts.losses.fastpitchloss import (
     DurationLoss,
     EnergyLoss,
-    MelLoss,
     PitchLoss,
 )
 from roar.collections.tts.losses.hifigan_losses import (
     FeatureMatchingLoss,
     GeneratorLoss,
     DiscriminatorLoss,
+    MelLoss,
 )
 from roar.collections.tts.models.base import TextToWaveform
 from roar.collections.tts.modules.hifigan_modules import (
@@ -30,7 +29,8 @@ from roar.collections.tts.modules.hifigan_modules import (
     MultiScaleDiscriminator,
 )
 from roar.collections.tts.modules.jets import JETSModule
-from roar.collections.tts.parts.mixins import FastPitchAdapterModelMixin
+
+# from roar.collections.tts.parts.mixins import FastPitchAdapterModelMixin
 from roar.collections.tts.parts.utils.callbacks import LoggingCallback
 from roar.collections.tts.parts.utils.helpers import (
     batch_from_ragged,
@@ -146,6 +146,10 @@ class JETSModel(TextToWaveform, Exportable):
         self.discriminator_loss = DiscriminatorLoss()
         self.generator_loss = GeneratorLoss()
 
+        self.adversarial_loss_scale = cfg.get("adversarial_loss_scale", 1.0)
+        self.mel_loss_scale = cfg.get("mel_loss_scale", 1.0)
+        self.feature_loss_scale = cfg.get("feature_loss_scale", 1.0)
+
         self.aligner = None
         if self.learn_alignment:
             aligner_loss_scale = cfg.get("aligner_loss_scale", 1.0)
@@ -213,7 +217,7 @@ class JETSModel(TextToWaveform, Exportable):
         self.automatic_optimization = False
         # Adapter modules setup (from FastPitchAdapterModelMixin)
         # self.setup_adapters()
-    
+
     @property
     def max_steps(self):
         if "max_steps" in self._cfg:
@@ -473,9 +477,7 @@ class JETSModel(TextToWaveform, Exportable):
         )
 
     # TODO: Write convert_text_to_waveform method
-    @typecheck(
-        output_types={"spect": NeuralType(("B", "T"), AudioSignal())}
-    )
+    @typecheck(output_types={"spect": NeuralType(("B", "T"), AudioSignal())})
     def convert_text_to_waveform(
         self,
         tokens: "torch.tensor",
@@ -613,7 +615,7 @@ class JETSModel(TextToWaveform, Exportable):
         dur_loss = self.duration_loss_fn(
             log_durs_predicted=log_durs_pred, durs_tgt=durs, len=text_lens
         )
-        loss = mel_loss + dur_loss
+        loss = mel_loss * self.mel_loss_scale + dur_loss
         if self.learn_alignment:
             ctc_loss = self.forward_sum_loss_fn(
                 attn_logprob=attn_logprob, in_lens=text_lens, out_lens=spec_len
@@ -646,7 +648,11 @@ class JETSModel(TextToWaveform, Exportable):
         loss_fm_msd = self.feature_loss(fmap_r=fmap_msd_real, fmap_g=fmap_msd_gen)
         loss_gen_mpd, _ = self.generator_loss(disc_outputs=mpd_score_gen)
         loss_gen_msd, _ = self.generator_loss(disc_outputs=msd_score_gen)
-        loss_g = loss_gen_msd + loss_gen_mpd + loss_fm_msd + loss_fm_mpd + loss
+        loss_g = (
+            (loss_gen_msd + loss_gen_mpd) * self.adversarial_loss_scale
+            + (loss_fm_msd + loss_fm_mpd) * self.feature_loss_scale
+            + loss
+        )
         self.manual_backward(loss_g)
         optim_g.step()
 
