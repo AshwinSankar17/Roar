@@ -52,6 +52,16 @@ model:
   highfreq: ${highfreq}
   window: ${window}
 
+  # Loss scales
+  dur_loss_scale: 1.0 # set to 0.1 to get fastpitch + aligner style
+  pitch_loss_scale: ${model.dur_loss_scale}
+  energy_loss_scale: ${model.dur_loss_scale}
+
+  aligner_loss_scale: 2.0
+  mel_loss_scale: 45.0
+  adversarial_loss_scale: 1.0
+  feature_loss_scale: 2.0
+
   text_tokenizer:
     _target_: roar.collections.common.tokenizers.text_to_speech.tts_tokenizers.TamilCharsTokenizer
     punct: true
