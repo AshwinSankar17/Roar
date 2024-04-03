@@ -452,10 +452,22 @@ class JETSModule(NeuralModule, adapter_mixins.AdapterModuleMixin):
             max_dur=self.max_token_duration,
             mask=enc_mask,
         )
-        pitch_predicted = (
-            self.pitch_predictor(enc_out, enc_mask, conditioning=spk_emb) + pitch
-        )
-        pitch_emb = self.pitch_emb(pitch_predicted.unsqueeze(1))
+        
+        if pitch is not None:
+            assert (
+                pitch.shape[-1] == text.shape[-1]
+            ), f"pitch.shape[-1]: {pitch.shape[-1]} != len(text)"
+            pitch_emb = self.pitch_emb(pitch)
+        else:
+            pitch_pred = self.pitch_predictor(
+                enc_out, enc_mask, conditioning=spk_emb
+            )
+            pitch_emb = self.pitch_emb(pitch_pred.unsqueeze(1))
+        
+        # pitch_predicted = (
+        #     self.pitch_predictor(enc_out, enc_mask, conditioning=spk_emb) + pitch
+        # )
+        # pitch_emb = self.pitch_emb(pitch_predicted.unsqueeze(1))
         enc_out = enc_out + pitch_emb.transpose(1, 2)
 
         if self.energy_predictor is not None:
@@ -485,13 +497,13 @@ class JETSModule(NeuralModule, adapter_mixins.AdapterModuleMixin):
             input=len_regulated, seq_lens=dec_lens, conditioning=spk_emb
         )
         # spect = self.proj(dec_out).transpose(1, 2)
-        wav = self.waveform_generator(dec_out.transpose(1, 2))
+        wav = self.waveform_generator(x=dec_out.transpose(1, 2))
         return (
             wav,
             dec_lens,
             durs_predicted,
             log_durs_predicted,
-            pitch_predicted,
+            pitch_pred,
             volume_extended,
         )
 
