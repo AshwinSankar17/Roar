@@ -477,7 +477,9 @@ class JETSModel(TextToWaveform, Exportable):
         )
 
     # TODO: Write convert_text_to_waveform method
-    @typecheck(output_types={"spect": NeuralType(("B", "T"), AudioSignal())})
+    @typecheck(
+        output_types={"wav": NeuralType(("B", "T"), AudioSignal())}
+    )
     def convert_text_to_waveform(
         self,
         tokens: "torch.tensor",
@@ -502,7 +504,7 @@ class JETSModel(TextToWaveform, Exportable):
             reference_spec=reference_spec,
             reference_spec_lens=reference_spec_lens,
         )
-        return wav
+        return wav.squeeze(1)
 
     def training_step(self, batch, batch_idx):
         attn_prior, durs, speaker, energy, reference_audio, reference_audio_len = (
@@ -715,10 +717,10 @@ class JETSModel(TextToWaveform, Exportable):
             "train/d_loss_msd": loss_disc_msd,
             "train/d_loss": loss_d,
             "train/global_step": self.global_step,
-            "lr": optim_g.param_groups[0]["lr"],
+            "train/g_lr": optim_g.param_groups[0]["lr"],
         }
         self.log_dict(metrics, on_step=True, sync_dist=True)
-        self.log("g_l1_loss", mel_loss, prog_bar=True, logger=False, sync_dist=True)
+        self.log("train/g_l1_loss", mel_loss, prog_bar=True, logger=False, sync_dist=True)
 
     def on_train_epoch_end(self) -> None:
         self.update_lr("epoch")
@@ -841,13 +843,13 @@ class JETSModel(TextToWaveform, Exportable):
         mel_loss = collect("mel_loss")
         dur_loss = collect("dur_loss")
         pitch_loss = collect("pitch_loss")
-        self.log("val_loss", val_loss, sync_dist=True)
-        self.log("val_mel_loss", mel_loss, sync_dist=True)
-        self.log("val_dur_loss", dur_loss, sync_dist=True)
-        self.log("val_pitch_loss", pitch_loss, sync_dist=True)
+        self.log("val/loss", val_loss, sync_dist=True)
+        self.log("val/mel_loss", mel_loss, sync_dist=True)
+        self.log("val/dur_loss", dur_loss, sync_dist=True)
+        self.log("val/pitch_loss", pitch_loss, sync_dist=True)
         if self.validation_step_outputs[0]["energy_loss"] is not None:
             energy_loss = collect("energy_loss")
-            self.log("val_energy_loss", energy_loss, sync_dist=True)
+            self.log("val/energy_loss", energy_loss, sync_dist=True)
 
         _, _, _, _, _, spec_target, spec_predict = self.validation_step_outputs[
             0

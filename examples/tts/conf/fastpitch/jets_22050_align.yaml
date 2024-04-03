@@ -2,7 +2,7 @@
 # If you want to train model on other dataset, you can change config values according to your dataset.
 # Most dataset-specific arguments are in the head of the config file, see below.
 
-name: IndicRasa/JETS
+name: Rasa/JETS
 
 train_dataset: ???
 validation_datasets: ???
@@ -262,6 +262,6 @@ exp_manager:
   create_tensorboard_logger: true
   create_checkpoint_callback: true
   checkpoint_callback_params:
-    monitor: val_loss
+    monitor: val/loss
   resume_if_exists: false
   resume_ignore_no_checkpoint: false
