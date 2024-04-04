@@ -656,14 +656,10 @@ class JETSModel(TextToWaveform, Exportable):
             self.feature_loss(fmap_r=fmap_msd_real, fmap_g=fmap_msd_gen)
             * self.feature_loss_scale
         )
-        loss_gen_mpd, _ = (
-            self.generator_loss(disc_outputs=mpd_score_gen)
-            * self.adversarial_loss_scale
-        )
-        loss_gen_msd, _ = (
-            self.generator_loss(disc_outputs=msd_score_gen)
-            * self.adversarial_loss_scale
-        )
+        loss_gen_mpd, _ = self.generator_loss(disc_outputs=mpd_score_gen)
+        loss_gen_msd, _ = self.generator_loss(disc_outputs=msd_score_gen)
+        loss_gen_mpd = loss_gen_mpd * self.adversarial_loss_scale
+        loss_gen_msd = loss_gen_msd * self.adversarial_loss_scale
         loss_g = (loss_gen_msd + loss_gen_mpd) + (loss_fm_msd + loss_fm_mpd) + loss
         self.manual_backward(loss_g)
         optim_g.step()
