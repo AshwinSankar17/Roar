@@ -121,7 +121,7 @@ psutil==5.9.5
 pyannote-core==5.0.0
 pyannote-database==5.0.1
 pyannote-metrics==3.2.1
-pyarrow==13.0.0
+pyarrow==14.0.1
 pyasn1==0.5.0
 pyasn1-modules==0.3.0
 pybind11==2.11.1
