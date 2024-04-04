@@ -477,9 +477,7 @@ class JETSModel(TextToWaveform, Exportable):
         )
 
     # TODO: Write convert_text_to_waveform method
-    @typecheck(
-        output_types={"wav": NeuralType(("B", "T"), AudioSignal())}
-    )
+    @typecheck(output_types={"wav": NeuralType(("B", "T"), AudioSignal())})
     def convert_text_to_waveform(
         self,
         tokens: "torch.tensor",
@@ -613,11 +611,14 @@ class JETSModel(TextToWaveform, Exportable):
             length=audio_lens,
         )
 
-        mel_loss = self.mel_loss_fn(spect_predicted=mels_pred, spect_tgt=mels_y)
+        mel_loss = (
+            self.mel_loss_fn(spect_predicted=mels_pred, spect_tgt=mels_y)
+            * self.mel_loss_scale
+        )
         dur_loss = self.duration_loss_fn(
             log_durs_predicted=log_durs_pred, durs_tgt=durs, len=text_lens
         )
-        loss = mel_loss * self.mel_loss_scale + dur_loss
+        loss = mel_loss
         if self.learn_alignment:
             ctc_loss = self.forward_sum_loss_fn(
                 attn_logprob=attn_logprob, in_lens=text_lens, out_lens=spec_len
@@ -637,7 +638,8 @@ class JETSModel(TextToWaveform, Exportable):
         energy_loss = self.energy_loss_fn(
             energy_predicted=energy_pred, energy_tgt=energy_tgt, length=text_lens
         )
-        loss += pitch_loss + energy_loss
+        var_loss = pitch_loss + energy_loss + dur_loss  # variance predictors loss
+        loss += var_loss
 
         optim_g.zero_grad()
         _, mpd_score_gen, fmap_mpd_real, fmap_mpd_gen = self.mpd(
@@ -646,15 +648,23 @@ class JETSModel(TextToWaveform, Exportable):
         _, msd_score_gen, fmap_msd_real, fmap_msd_gen = self.msd(
             y=audio_, y_hat=wavs_pred
         )
-        loss_fm_mpd = self.feature_loss(fmap_r=fmap_mpd_real, fmap_g=fmap_mpd_gen)
-        loss_fm_msd = self.feature_loss(fmap_r=fmap_msd_real, fmap_g=fmap_msd_gen)
-        loss_gen_mpd, _ = self.generator_loss(disc_outputs=mpd_score_gen)
-        loss_gen_msd, _ = self.generator_loss(disc_outputs=msd_score_gen)
-        loss_g = (
-            (loss_gen_msd + loss_gen_mpd) * self.adversarial_loss_scale
-            + (loss_fm_msd + loss_fm_mpd) * self.feature_loss_scale
-            + loss
+        loss_fm_mpd = (
+            self.feature_loss(fmap_r=fmap_mpd_real, fmap_g=fmap_mpd_gen)
+            * self.feature_loss_scale
         )
+        loss_fm_msd = (
+            self.feature_loss(fmap_r=fmap_msd_real, fmap_g=fmap_msd_gen)
+            * self.feature_loss_scale
+        )
+        loss_gen_mpd, _ = (
+            self.generator_loss(disc_outputs=mpd_score_gen)
+            * self.adversarial_loss_scale
+        )
+        loss_gen_msd, _ = (
+            self.generator_loss(disc_outputs=msd_score_gen)
+            * self.adversarial_loss_scale
+        )
+        loss_g = (loss_gen_msd + loss_gen_mpd) + (loss_fm_msd + loss_fm_mpd) + loss
         self.manual_backward(loss_g)
         optim_g.step()
 
@@ -720,7 +730,9 @@ class JETSModel(TextToWaveform, Exportable):
             "train/g_lr": optim_g.param_groups[0]["lr"],
         }
         self.log_dict(metrics, on_step=True, sync_dist=True)
-        self.log("train/g_l1_loss", mel_loss, prog_bar=True, logger=False, sync_dist=True)
+        self.log(
+            "train/g_l1_loss", mel_loss, prog_bar=True, logger=False, sync_dist=True
+        )
 
     def on_train_epoch_end(self) -> None:
         self.update_lr("epoch")
