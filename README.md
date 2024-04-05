@@ -9,8 +9,23 @@ ROAR is a toolkit for Indic languages that provides a unified interface for vari
 To setup the toolkit, clone the repository and follow the instructions given below.
 
 ```
+conda create -n roar python=3.10
 pip install Cython
+conda install pytorch torchvision torchaudio pytorch-cuda=11.8 -c pytorch -c nvidia
 pip install -r requirements.txt
+```
+
+TinyLLaMa specific
+
+```
+conda install xformers -c xformers
+git clone https://github.com/Dao-AILab/flash-attention
+cd flash-attention
+python setup.py install
+cd csrc/rotary && pip install .
+cd ../layer_norm && pip install .
+cd ../xentropy && pip install .
+cd ../.. && rm -rf flash-attention
 ```
 
 After installing the requirements, 
@@ -54,14 +69,10 @@ A more in-depth tutorial will be added soon.
 - [x] One TTS Alignment
 - [x] Fastpitch
 - [x] HiFi-GAN
+- [x] JETS
 - [x] ConformerLayer
-- [ ] Relative Position Embeddings
-- [ ] Rotary Position Embeddings
-- [ ] Sparse Attention
-- [ ] WaveGrad
-- [ ] GlowTTS
-- [ ] FastDiff
-- [ ] WaveNet
+- [x] Rotary Position Embeddings
+- [ ] TinyLLaMa
 
 ---
 **Disclaimer**: All the code in this repository, forked from NeMo, follows the licensing of the original NeMo repository. The code is provided as-is for research purposes only and without any guarantees. Please contact the original authors for any commercial use.
