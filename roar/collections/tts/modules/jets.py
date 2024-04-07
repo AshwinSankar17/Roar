@@ -7,7 +7,7 @@ from roar.collections.tts.modules.submodules import (
 from roar.collections.tts.parts.utils.helpers import (
     binarize_attention_parallel,
     regulate_len,
-    get_random_segments,
+    rand_slice_segments,
 )
 from roar.core.classes import NeuralModule, adapter_mixins, typecheck
 from roar.core.neural_types.elements import (
@@ -397,7 +397,7 @@ class JETSModule(NeuralModule, adapter_mixins.AdapterModuleMixin):
         )
 
         z_segments, z_start_idxs = (
-            get_random_segments(  # TODO: Change to rand_slice_segments from utils
+            rand_slice_segments(  # TODO: Change to rand_slice_segments from utils
                 dec_out.transpose(1, 2), mel_lens, self.segment_size
             )
         )

@@ -1,3 +1,4 @@
+import torch
 import pytorch_lightning as pl
 
 from roar.collections.common.callbacks import LogEpochTimeCallback
@@ -22,6 +23,7 @@ def main(cfg):
     lr_logger = pl.callbacks.LearningRateMonitor()
     epoch_time_logger = LogEpochTimeCallback()
     trainer.callbacks.extend([lr_logger, epoch_time_logger])
+    torch.set_float32_matmul_precision("high")
     trainer.fit(model)
 
 

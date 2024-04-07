@@ -9,8 +9,8 @@ from roar.collections.asr.data.audio_to_text import (
     cache_datastore_manifests,
     expand_sharded_filepaths,
 )
-from roar.collections.tts.parts.preprocessing.features import WaveformFeaturizer
-from roar.collections.tts.parts.preprocessing.segment import (
+from roar.collections.asr.parts.preprocessing.features import WaveformFeaturizer
+from roar.collections.asr.parts.preprocessing.segment import (
     available_formats as valid_sf_formats,
 )
 from roar.collections.common.parts.preprocessing import collections

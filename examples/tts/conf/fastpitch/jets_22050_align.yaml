@@ -21,9 +21,9 @@ pitch_std:  ???  # e.g.  68.52806091308594 for LJSpeech
 # Default values for dataset with sample_rate=44100
 sample_rate: 22050
 n_mel_channels: 80
-n_window_size: 2048
-n_window_stride: 512
-n_fft: 2048
+n_window_size: 1024
+n_window_stride: 256
+n_fft: 1024
 lowfreq: 0
 highfreq: 8000
 window: hann
@@ -35,7 +35,7 @@ model:
   max_token_duration: 75
   symbols_embedding_dim: 384
   pitch_embedding_kernel_size: 3
-  segment_size: 64
+  segment_size: 32
     
   pitch_fmin: ${pitch_fmin}
   pitch_fmax: ${pitch_fmax}

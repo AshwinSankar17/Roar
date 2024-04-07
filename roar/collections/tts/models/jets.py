@@ -39,7 +39,7 @@ from roar.collections.tts.parts.utils.helpers import (
     plot_spectrogram_to_numpy,
     process_batch,
     sample_tts_input,
-    get_segments,
+    slice_segments,
     get_batch_size,
     get_num_workers,
 )
@@ -576,11 +576,10 @@ class JETSModel(TextToWaveform, Exportable):
         if durs is None:
             durs = attn_hard_dur
 
-        audio_ = get_segments(  # get ground truth audio segment
+        audio_ = slice_segments(  # get ground truth audio segment
             x=audio.unsqueeze(1),
-            start_idxs=z_start_idxs * self.jets.waveform_generator.upsample_factor,
-            segment_size=self.jets.waveform_generator.upsample_factor
-            * self.segment_size,
+            ids_str=z_start_idxs * self._cfg.n_window_stride,
+            segment_size=self.segment_size * self._cfg.n_window_stride,
         )
 
         # Train Discriminator
@@ -804,11 +803,10 @@ class JETSModel(TextToWaveform, Exportable):
         if durs is None:
             durs = attn_hard_dur
 
-        audio_ = get_segments(  # get ground truth audio segment
+        audio_ = slice_segments(  # get ground truth audio segment
             x=audio.unsqueeze(1),
-            start_idxs=z_start_idxs * self.jets.waveform_generator.upsample_factor,
-            segment_size=self.jets.waveform_generator.upsample_factor
-            * self.segment_size,
+            ids_str=z_start_idxs * self._cfg.n_window_stride,
+            segment_size=self.segment_size * self._cfg.n_window_stride,
         )
         mels_y, _ = self.preprocessor(  # get mel spectrogram for the audio segment
             input_signal=audio_.squeeze(1),
