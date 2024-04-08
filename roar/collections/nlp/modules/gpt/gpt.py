@@ -8,17 +8,20 @@ from lightning_utilities.core.imports import RequirementCache
 from xformers.ops import SwiGLU
 
 from roar.collections.nlp.modules.gpt.config import Config
-from roar.collections.nlp.parts.submodules.llm import KVCache, RMSNorm  # noqa: F401
-from roar.collections.nlp.modules.gpt.rope import apply_rotary_emb_func
+from roar.core.classes import NeuralModule
+from roar.collections.nlp.parts.submodules.llm import KVCache
+from roar.collections.nlp.parts.submodules.normalization import RMSNorm, FusedRMSNorm
+from roar.collections.nlp.parts.submodules.positional_encodings import (
+    apply_rotary_emb_func,
+)
 
 RoPECache = Tuple[torch.Tensor, torch.Tensor]
 FlashAttention2Available = RequirementCache("flash-attn>=2.0.0.post1")
+APEX_AVAILABLE = RequirementCache("apex")
 
 
-def build_mask_cache(
-    max_seq_length: int, device: Optional[torch.device] = None
-) -> torch.Tensor:
-    ones = torch.ones((max_seq_length, max_seq_length), device=device, dtype=torch.bool)
+def build_mask_cache(max_seq_length: int, device: torch.device) -> torch.Tensor:
+    ones = torch.ones((max_seq_length, max_seq_length), dtype=torch.bool, device=device)
     return torch.tril(ones).unsqueeze(0).unsqueeze(0)
 
 
@@ -51,25 +54,53 @@ def build_rope_cache(
     #     return cos.bfloat16(), sin.bfloat16()
     # ptl takes care of type casting
     # this is to mimic the behaviour of complex32, else we will get different results
-    if cos.dtype in (torch.float16, torch.bfloat16, torch.int8):
-        return cos.half(), sin.half()
+    # if cos.dtype in (torch.float16, torch.bfloat16, torch.int8):
+    #     return cos.half(), sin.half()
     return cos, sin
 
 
-class GPT(nn.Module):
-    def __init__(self, config: Config) -> None:
+class GPT(NeuralModule):
+    def __init__(
+        self,
+        padded_vocab_size: int,
+        n_embd: int,
+        n_layers: int,
+        block_size: int = 4096,
+        rope_base: int = 10000,
+        n_head: int = 8,
+        rope_condense_ratio: float = 1.0,
+        rotary_percentage: int = 1,
+        norm_class: nn.Module = FusedRMSNorm,
+        norm_eps: float = 1e-5,
+        lm_head_bias: bool = False,
+        scale_embeddings: bool = False,
+        config: Config = None,
+    ) -> None:
         super().__init__()
-        assert config.padded_vocab_size is not None
+        assert padded_vocab_size is not None
+
+        self.padded_vocab_size = padded_vocab_size
+        self.n_embd = n_embd
+        self.n_layers = n_layers
+        self.block_size = block_size
+        self.norm_eps = norm_eps
+        self.scale_embeddings = scale_embeddings
+        self.rope_base = rope_base
+        self.n_head = n_head
+        self.rope_condense_ratio = rope_condense_ratio
+        self.head_size = self.n_embd // self.n_head
+        self.rotary_percentage = rotary_percentage
+        norm_class = self._maybe_bump_to_fused_norm(norm_class)
+        # self.lm_head_bias = lm_head_bias
+
         self.config = config
 
-        self.lm_head = nn.Linear(
-            config.n_embd, config.padded_vocab_size, bias=config.lm_head_bias
-        )
+        self.lm_head = nn.Linear(self.n_embd, padded_vocab_size, bias=lm_head_bias)
         self.transformer = nn.ModuleDict(
             dict(
-                wte=nn.Embedding(config.padded_vocab_size, config.n_embd),
-                h=nn.ModuleList(Block(config) for _ in range(config.n_layer)),
-                ln_f=config.norm_class(config.n_embd, eps=config.norm_eps),
+                wte=nn.Embedding(padded_vocab_size, self.n_embd),
+                h=nn.ModuleList(Block(config) for _ in range(self.n_layers)),
+                ln_f=norm_class(self.n_embd, eps=self.norm_eps),
             )
         )
 
@@ -77,44 +108,25 @@ class GPT(nn.Module):
         self.rope_cache: Optional[RoPECache] = None
         self.mask_cache: Optional[torch.Tensor] = None
 
-    @property
-    def max_seq_length(self) -> int:
-        return self._max_seq_length
+    def _maybe_bump_to_fused_norm(self, norm_class: nn.Module) -> nn.Module:
+        if APEX_AVAILABLE:
+            from apex.normalization import FusedLayerNorm
 
-    @max_seq_length.setter
-    def max_seq_length(self, value: int) -> None:
-        """
-        When doing inference, the sequences used might be shorter than the model's context length.
-        This allows setting a smaller number to avoid allocating unused memory
-        """
-        if value > self.config.block_size:
-            raise ValueError(
-                f"Cannot attend to {value}, block size is only {self.config.block_size}"
-            )
-        self._max_seq_length = value
-        if not hasattr(self, "rope_cache"):
-            # first call
-            rope = self.build_rope_cache()
-            self.register_buffer("rope_cache", rope, persistent=False)
-        elif value != self.rope_cache[0].size(0):
-            self.build_rope_cache()
-
-    def reset_parameters(self) -> None:
-        # Trigger resetting the rope-cache
-        self.rope_cache = self.build_rope_cache()
+            return {"LayerNorm": FusedLayerNorm}.get(norm_class.__name__, norm_class)
+        return norm_class
 
     def _init_weights(self, module: nn.Module, n_layer: Optional[int] = None) -> None:
         """Meant to be used with `gpt.apply(gpt._init_weights)`."""
         # GPT-NeoX  https://arxiv.org/pdf/2204.06745.pdf
         if isinstance(module, nn.Embedding):
             torch.nn.init.normal_(
-                module.weight, mean=0.0, std=math.sqrt(2.0 / 5 / self.config.n_embd)
+                module.weight, mean=0.0, std=math.sqrt(2.0 / 5 / self.n_embd)
             )
             # RWKV: set it to 1e-4
             # torch.nn.init.uniform_(module.weight,  -1e-4, 1e-4)
         elif isinstance(module, nn.Linear):
             torch.nn.init.normal_(
-                module.weight, mean=0.0, std=math.sqrt(2.0 / 5 / self.config.n_embd)
+                module.weight, mean=0.0, std=math.sqrt(2.0 / 5 / self.n_embd)
             )
             if module.bias is not None:
                 torch.nn.init.zeros_(module.bias)
@@ -125,9 +137,7 @@ class GPT(nn.Module):
                 and isinstance(module, SwiGLU)
                 or (name == "proj.weight" and isinstance(module, CausalSelfAttention))
             ):  # if use xformer swiglu, fc2 layer will be renamed to w3
-                nn.init.normal_(
-                    p, mean=0.0, std=1 / math.sqrt(self.config.n_embd) / n_layer
-                )
+                nn.init.normal_(p, mean=0.0, std=1 / math.sqrt(self.n_embd) / n_layer)
 
     def forward(
         self,
@@ -137,15 +147,15 @@ class GPT(nn.Module):
     ) -> torch.Tensor:
         T = idx.size(1)
         use_kv_cache = input_pos is not None
-        block_size = self.config.block_size
+        block_size = self.block_size
 
         if max_seq_length is None:
             max_seq_length = block_size
 
         if use_kv_cache:
             assert (
-                self.max_seq_length >= T
-            ), f"Cannot forward sequence of length {T}, max seq length is only {self.max_seq_length}."
+                max_seq_length >= T
+            ), f"Cannot forward sequence of length {T}, max seq length is only {max_seq_length}."
 
         assert (
             max_seq_length <= block_size
@@ -162,18 +172,19 @@ class GPT(nn.Module):
             cos = cos.index_select(0, input_pos)
             sin = sin.index_select(0, input_pos)
             if self.mask_cache is None:
-                self.mask_cache = build_mask_cache(max_seq_length)
+                self.mask_cache = self.build_mask_cache(idx)
                 # raise TypeError("You need to call `gpt.set_kv_cache()`")
             mask = self.mask_cache.index_select(2, input_pos)
-            self.set_kv_cache(idx.size(0), max_seq_length, cos.size(-1) * 2)
+            mask = mask[:, :, :, :max_seq_length]
+            self.set_kv_cache(idx, max_seq_length, cos.size(-1) * 2)
         else:
             cos = cos[:T]
             sin = sin[:T]
             mask = None
 
         x = self.transformer.wte(idx)  # token embeddings of shape (b, t, n_embd)
-        if self.config.scale_embeddings:
-            x = x * (self.config.n_embd**0.5)
+        if self.scale_embeddings:
+            x = x * (self.n_embd**0.5)
 
         for block in self.transformer.h:
             x = block(x, (cos, sin), mask, input_pos)
@@ -184,26 +195,26 @@ class GPT(nn.Module):
     def from_name(cls, name: str, **kwargs: Any) -> Self:
         return cls(Config.from_name(name, **kwargs))
 
-    def build_rope_cache(
-        self,
-        # device: Optional[torch.device] = None
-    ) -> RoPECache:
+    def build_rope_cache(self, idx: "torch.tensor") -> RoPECache:
         return build_rope_cache(
-            seq_len=self.max_seq_length,
+            seq_len=self.block_size,
             n_elem=int(self.config.rotary_percentage * self.config.head_size),
-            # device=device,
             condense_ratio=self.config.rope_condense_ratio,
+            device=idx.device,
             base=self.config.rope_base,
         )
 
+    def build_mask_cache(self, idx: "torch.tensor") -> "torch.tensor":
+        return build_mask_cache(self.block_size, device=idx.device)
+
     def set_kv_cache(
         self,
-        batch_size: int,
+        idx: "torch.tensor",
         max_seq_length: int,
         rope_cache_length: Optional[int] = None,
-        # device: Optional[torch.device] = None,
         dtype: Optional[torch.dtype] = None,
     ) -> None:
+        batch_size = idx.size(0)
         if rope_cache_length is None:
             rope_cache_length = self.cos.size(-1)
         # max_seq_length = self.max_seq_length
@@ -214,7 +225,7 @@ class GPT(nn.Module):
                 batch_size,
                 max_seq_length,
                 rope_cache_length,
-                # device,
+                idx.device,
                 dtype,
             )
 
@@ -289,14 +300,10 @@ class CausalSelfAttention(nn.Module):
 
         cos, sin = rope
 
-        q_roped = apply_rotary_emb_func(
-            q[..., : self.config.rope_n_elem], cos, sin, False, False
-        )
-        k_roped = apply_rotary_emb_func(
-            k[..., : self.config.rope_n_elem], cos, sin, False, False
-        )
-        q = torch.cat((q_roped, q[..., self.config.rope_n_elem :]), dim=-1)
-        k = torch.cat((k_roped, k[..., self.config.rope_n_elem :]), dim=-1)
+        q = apply_rotary_emb_func(q, cos, sin, False, False)
+        k = apply_rotary_emb_func(k, cos, sin, False, False)
+        # q = torch.cat((q_roped, q[..., self.config.rope_n_elem :]), dim=-1)
+        # k = torch.cat((k_roped, k[..., self.config.rope_n_elem :]), dim=-1)
 
         if input_pos is not None:
             if not isinstance(self.kv_cache, KVCache):
@@ -305,9 +312,7 @@ class CausalSelfAttention(nn.Module):
 
         y = self.scaled_dot_product_attention(q, k, v, mask)
 
-        y = y.reshape(
-            B, T, self.config.head_size * self.config.n_head
-        )  # re-assemble all head outputs side by side
+        y = y.reshape(B, T, C)  # re-assemble all head outputs side by side
 
         # output projection
         return self.proj(y)
@@ -353,7 +358,7 @@ class CausalSelfAttention(nn.Module):
         dtype: Optional[torch.dtype] = None,
     ) -> "KVCache":
         heads = 1 if self.config.n_query_groups == 1 else self.config.n_head
-        v_shape = (batch_size, heads, max_seq_length, self.config.head_size)
+        v_shape = (batch_size, max_seq_length, heads, self.config.head_size)
         if rope_cache_length is None:
             if self.config.rotary_percentage != 1.0:
                 raise TypeError(
@@ -363,9 +368,11 @@ class CausalSelfAttention(nn.Module):
         else:
             k_shape = (
                 batch_size,
-                heads,
                 max_seq_length,
-                rope_cache_length + self.config.head_size - self.config.rope_n_elem,
+                heads,
+                rope_cache_length
+                + self.config.head_size
+                - int(self.config.rotary_percentage * self.config.head_size),
             )
         return KVCache(k_shape, v_shape, device=device, dtype=dtype)
 
@@ -373,17 +380,28 @@ class CausalSelfAttention(nn.Module):
 class LLaMAMLP(nn.Module):
     def __init__(self, config: Config) -> None:
         super().__init__()
-        self.fc_1 = nn.Linear(config.n_embd, config.intermediate_size, bias=config.bias)
-        self.fc_2 = nn.Linear(config.n_embd, config.intermediate_size, bias=config.bias)
-        self.proj = nn.Linear(config.intermediate_size, config.n_embd, bias=config.bias)
-
-        self.config = config
+        self.swiglu = SwiGLU(
+            config.n_embd, config.intermediate_size, bias=False, _pack_weights=False
+        )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x_fc_1 = self.fc_1(x)
-        x_fc_2 = self.fc_2(x)
-        x = torch.nn.functional.silu(x_fc_1) * x_fc_2
-        return self.proj(x)
+        self.swiglu(x)
+
+
+# class LLaMAMLP(nn.Module):
+#     def __init__(self, config: Config) -> None:
+#         super().__init__()
+#         self.fc_1 = nn.Linear(config.n_embd, config.intermediate_size, bias=config.bias)
+#         self.fc_2 = nn.Linear(config.n_embd, config.intermediate_size, bias=config.bias)
+#         self.proj = nn.Linear(config.intermediate_size, config.n_embd, bias=config.bias)
+
+#         self.config = config
+
+#     def forward(self, x: torch.Tensor) -> torch.Tensor:
+#         x_fc_1 = self.fc_1(x)
+#         x_fc_2 = self.fc_2(x)
+#         x = torch.nn.functional.silu(x_fc_1) * x_fc_2
+#         return self.proj(x)
 
 
 class Block(nn.Module):
