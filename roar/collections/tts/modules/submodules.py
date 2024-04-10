@@ -214,6 +214,63 @@ class ConvNorm(torch.nn.Module, adapter_mixins.AdapterModuleMixin):
 
         return ret
 
+    def remove_weight_norm(self):
+        torch.nn.utils.remove_weight_norm(self.conv)
+
+
+class ConvTransposeNorm(torch.nn.Module, adapter_mixins.AdapterModuleMixin):
+    def __init__(
+        self,
+        in_channels,
+        out_channels,
+        kernel_size=1,
+        stride=1,
+        padding=None,
+        dilation=1,
+        bias=True,
+        w_init_gain="linear",
+        use_weight_norm=False,
+        norm_fn=None,
+    ):
+        super(ConvTransposeNorm, self).__init__()
+        if padding is None:
+            assert kernel_size % 2 == 1
+            padding = int(dilation * (kernel_size - 1) / 2)
+        conv_fn = torch.nn.ConvTranspose1d
+        self.conv = conv_fn(
+            in_channels,
+            out_channels,
+            kernel_size=kernel_size,
+            stride=stride,
+            padding=padding,
+            dilation=dilation,
+            bias=bias,
+        )
+        torch.nn.init.xavier_uniform_(
+            self.conv.weight, gain=torch.nn.init.calculate_gain(w_init_gain)
+        )
+        if use_weight_norm:
+            self.conv = torch.nn.utils.weight_norm(self.conv)
+        if norm_fn is not None:
+            self.norm = norm_fn(out_channels, affine=True)
+        else:
+            self.norm = None
+
+    def forward(self, signal, mask=None):
+        if mask is not None:
+            signal = signal.mul(mask)
+        ret = self.conv(signal)
+        if self.norm is not None:
+            ret = self.norm(ret)
+
+        if self.is_adapter_available():
+            ret = self.forward_enabled_adapters(ret.transpose(1, 2)).transpose(1, 2)
+
+        return ret
+
+    def remove_weight_norm(self):
+        torch.nn.utils.remove_weight_norm(self.conv)
+
 
 class LocationLayer(torch.nn.Module):
     def __init__(self, attention_n_filters, attention_kernel_size, attention_dim):
@@ -876,11 +933,3 @@ class SpeakerEncoder(NeuralModule):
                 )
 
         return embs
-
-
-# Activations
-class Swish(torch.nn.SiLU):
-    """
-    Swish activation function introduced in 'https://arxiv.org/abs/1710.05941'
-    Mathematically identical to SiLU. See note in nn.SiLU for references.
-    """
