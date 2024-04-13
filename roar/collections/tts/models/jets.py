@@ -157,7 +157,7 @@ class JETSModel(TextToWaveform, Exportable):
             self.forward_sum_loss_fn = ForwardSumLoss(loss_scale=aligner_loss_scale)
             self.bin_loss_fn = BinLoss(loss_scale=aligner_loss_scale)
 
-        self.preprocessor = instantiate(self._cfg.preprocessor)
+        self.preprocessor = instantiate(self._cfg.preprocessor, highfreq=None, use_grads=True)
         input_fft = instantiate(self._cfg.input_fft, **input_fft_kwargs)
         output_fft = instantiate(self._cfg.output_fft)
         duration_predictor = instantiate(self._cfg.duration_predictor)
@@ -536,11 +536,11 @@ class JETSModel(TextToWaveform, Exportable):
         else:
             audio, audio_lens, text, text_lens, durs, pitch, speaker = batch
 
-        mels, spec_len = self.preprocessor(input_signal=audio, length=audio_lens)
+        mels, spec_len = self.preprocessor(audio, audio_lens)
         reference_spec, reference_spec_len = None, None
         if reference_audio is not None:
             reference_spec, reference_spec_len = self.preprocessor(
-                input_signal=reference_audio, length=reference_audio_len
+                reference_audio, reference_audio_len
             )
 
         optim_g, optim_d = self.optimizers()
@@ -601,23 +601,24 @@ class JETSModel(TextToWaveform, Exportable):
         optim_d.step()
 
         # Train Generator
+        optim_g.zero_grad()
         mels_y, _ = self.preprocessor(  # get mel spectrogram for the audio segment
-            input_signal=audio_.squeeze(1),
-            length=audio_lens,
+            audio_.squeeze(1),
+            audio_lens,
         )
         mels_pred, _ = self.preprocessor(  # get mel spectrogram for predicted audio
-            input_signal=wavs_pred.squeeze(1),
-            length=audio_lens,
+            wavs_pred.squeeze(1),
+            audio_lens,
         )
 
         mel_loss = (
             self.mel_loss_fn(spect_predicted=mels_pred, spect_tgt=mels_y)
-            * self.mel_loss_scale
         )
+        # mel_loss = torch.nn.functional.l1_loss(mels_pred, mels_y) * self.mel_loss_scale
         dur_loss = self.duration_loss_fn(
             log_durs_predicted=log_durs_pred, durs_tgt=durs, len=text_lens
         )
-        loss = mel_loss
+        loss = mel_loss * self.mel_loss_scale
         if self.learn_alignment:
             ctc_loss = self.forward_sum_loss_fn(
                 attn_logprob=attn_logprob, in_lens=text_lens, out_lens=spec_len
@@ -639,8 +640,7 @@ class JETSModel(TextToWaveform, Exportable):
         )
         var_loss = pitch_loss + energy_loss + dur_loss  # variance predictors loss
         loss += var_loss
-
-        optim_g.zero_grad()
+        
         _, mpd_score_gen, fmap_mpd_real, fmap_mpd_gen = self.mpd(
             y=audio_, y_hat=wavs_pred
         )
@@ -764,11 +764,11 @@ class JETSModel(TextToWaveform, Exportable):
         else:
             audio, audio_lens, text, text_lens, durs, pitch, speaker = batch
 
-        mels, mel_lens = self.preprocessor(input_signal=audio, length=audio_lens)
+        mels, mel_lens = self.preprocessor(audio, audio_lens)
         reference_spec, reference_spec_len = None, None
         if reference_audio is not None:
             reference_spec, reference_spec_len = self.preprocessor(
-                input_signal=reference_audio, length=reference_audio_len
+                reference_audio, reference_audio_len
             )
 
         # Calculate val loss on ground truth durations to better align L2 loss in time
@@ -809,15 +809,16 @@ class JETSModel(TextToWaveform, Exportable):
             segment_size=self.segment_size * self._cfg.n_window_stride,
         )
         mels_y, _ = self.preprocessor(  # get mel spectrogram for the audio segment
-            input_signal=audio_.squeeze(1),
-            length=audio_lens,
+            audio_.squeeze(1),
+            audio_lens,
         )
         mels_pred, _ = self.preprocessor(  # get mel spectrogram for predicted audio
-            input_signal=wavs_pred.squeeze(1),
-            length=audio_lens,
+            wavs_pred.squeeze(1),
+            audio_lens,
         )
 
         mel_loss = self.mel_loss_fn(spect_predicted=mels_pred, spect_tgt=mels_y)
+        # mel_loss = torch.nn.functional.l1_loss(mels_pred, mels_y) * self.mel_loss_scale
         dur_loss = self.duration_loss_fn(
             log_durs_predicted=log_durs_pred, durs_tgt=durs, len=text_lens
         )
@@ -876,6 +877,9 @@ class JETSModel(TextToWaveform, Exportable):
                 dataformats="HWC",
             )
             self.log_train_images = True
+        self.log(
+            "val/g_l1_loss", mel_loss, prog_bar=True, logger=False, sync_dist=True
+        )
         self.validation_step_outputs.clear()  # free memory)
 
     def _setup_train_dataloader(self, cfg):
