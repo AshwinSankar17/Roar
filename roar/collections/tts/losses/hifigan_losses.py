@@ -110,14 +110,6 @@ class MelLoss(Loss):
     @typecheck()
     def forward(self, spect_predicted, spect_tgt):
         spect_tgt.requires_grad = False
-        spect_tgt = spect_tgt.transpose(1, 2)  # (B, T, H)
-        spect_predicted = spect_predicted.transpose(1, 2)  # (B, T, H)
-
-        ldiff = spect_tgt.size(1) - spect_predicted.size(1)
-        spect_predicted = F.pad(spect_predicted, (0, 0, 0, ldiff, 0, 0), value=0.0)
-        mel_mask = spect_tgt.ne(0).float()
         loss_fn = F.l1_loss
-        mel_loss = loss_fn(spect_predicted, spect_tgt, reduction="none")
-        mel_loss = (mel_loss * mel_mask).sum() / mel_mask.sum()
-
+        mel_loss = loss_fn(spect_predicted, spect_tgt)
         return mel_loss
