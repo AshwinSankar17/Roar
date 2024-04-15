@@ -26,7 +26,10 @@ from roar.core.neural_types.elements import (
 )
 from roar.core.neural_types.neural_type import NeuralType
 
-
+from roar.collections.tts.parts.utils.gradient_reversal import GradientReversal
+from roar.collections.tts.parts.utils.activations import SnakeBeta
+from roar.collections.tts.modules.bigvgan_modules import ResidualBlock
+from roar.collections.tts.modules.alias_free_torch import Activation1d
 def average_features(pitch, durs):
     durs_cums_ends = torch.cumsum(durs, dim=1).long()
     durs_cums_starts = torch.nn.functional.pad(durs_cums_ends[:, :-1], (1, 0))
@@ -58,6 +61,29 @@ def log_to_duration(log_dur, min_dur, max_dur, mask):
     dur = torch.clamp(torch.exp(log_dur) - 1.0, min_dur, max_dur)
     dur *= mask.squeeze(2)
     return dur
+
+
+class CNNLSTM(nn.Module):
+    def __init__(self, indim, outdim, head, global_pred=False):
+        super().__init__()
+        self.global_pred = global_pred
+        
+        self.model = nn.Sequential(
+            ResidualBlock(channels = indim, filters = indim, kernel_size = 7, dilation=1),
+            ResidualBlock(channels = indim, filters = indim, kernel_size = 7, dilation=2),
+            ResidualBlock(channels = indim, filters = indim, kernel_size = 7, dilation=3),
+            Activation1d(activation=SnakeBeta(indim, alpha_logscale=True)),
+            Rearrange("b c t -> b t c"),
+        )
+        self.heads = nn.ModuleList([nn.Linear(indim, outdim) for i in range(head)])
+
+    def forward(self, x):
+        # x: [B, C, T]
+        x = self.model(x)
+        if self.global_pred:
+            x = torch.mean(x, dim=1, keepdim=False)
+        outs = [head(x) for head in self.heads]
+        return outs
 
 
 class ConvReLUNorm(torch.nn.Module, adapter_mixins.AdapterModuleMixin):
