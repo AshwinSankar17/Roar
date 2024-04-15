@@ -4,6 +4,7 @@ from roar.collections.tts.modules.submodules import (
     ConditionalInput,
     ConditionalLayerNorm,
 )
+from roar.collections.tts.modules.attention import MultiHeadCrossAttn
 from roar.collections.tts.parts.utils.helpers import (
     binarize_attention_parallel,
     regulate_len,
@@ -98,17 +99,25 @@ class TemporalPredictor(NeuralModule):
     def __init__(
         self,
         input_size,
-        filter_size,
-        kernel_size,
-        dropout,
-        n_layers=2,
+        filter_size=512,
+        n_attn_heads=8,
+        kernel_size=3,
+        dropout=0.5,
+        n_layers=30,
+        cross_attn_interval=3,
+        pre_ln=False,
         condition_types=[],
     ):
         super(TemporalPredictor, self).__init__()
+        d_head = filter_size // n_attn_heads
+        assert n_attn_heads * d_head == filter_size
+        self.cross_attn_interval = cross_attn_interval
         self.cond_input = ConditionalInput(input_size, input_size, condition_types)
-        self.layers = torch.nn.ModuleList()
+        # self.layers = torch.nn.ModuleList()
+        self.conv_layers = torch.nn.ModuleList()
+        self.attn_layers = torch.nn.ModuleList()
         for i in range(n_layers):
-            self.layers.append(
+            self.conv_layers.append(
                 ConvReLUNorm(
                     input_size if i == 0 else filter_size,
                     filter_size,
@@ -118,6 +127,8 @@ class TemporalPredictor(NeuralModule):
                     condition_types=condition_types,
                 )
             )
+            if i % cross_attn_interval == cross_attn_interval - 1:
+                self.attn_layers = MultiHeadCrossAttn(n_attn_heads, filter_size, d_head, 0.2, pre_lnorm=pre_ln)
         self.fc = torch.nn.Linear(filter_size, 1, bias=True)
 
         # Use for adapter input dimension
@@ -143,14 +154,30 @@ class TemporalPredictor(NeuralModule):
         enc = self.cond_input(enc, conditioning)
         out = enc * enc_mask
         out = out.transpose(1, 2)
-
-        for layer in self.layers:
+        idx = 0
+        for i, layer in enumerate(self.conv_layers):
             out = layer(out, conditioning=conditioning)
-
+            if i % self.cross_attn_interval == self.cross_attn_interval - 1:
+                out = out.transpose(1, 2)
+                out = self.attn_layers[idx](out, conditioning=conditioning)
+                out = out.transpose(1, 2)
+                idx+=1
+                
         out = out.transpose(1, 2)
         out = self.fc(out) * enc_mask
         return out.squeeze(-1)
 
+
+class SpeechPromptEncoder(NeuralModule):
+    def __init__(self, prompt_encoder: NeuralModule, n_mel_channels: int = 80) -> None:
+        super().__init__()
+        self.prompt_encoder = prompt_encoder
+        self.inp_proj = torch.nn.Linear(n_mel_channels, prompt_encoder.d_model)
+    
+    def forward(self, inp):
+        out = self.inp_proj(inp)
+        out = self.prompt_encoder(out)
+        return out
 
 class JETSModule(NeuralModule, adapter_mixins.AdapterModuleMixin):
     def __init__(
@@ -328,7 +355,7 @@ class JETSModule(NeuralModule, adapter_mixins.AdapterModuleMixin):
 
         attn_soft, attn_hard, attn_hard_dur, attn_logprob = None, None, None, None
         if self.learn_alignment and spec is not None:
-            text_emb = self.encoder.word_emb(text)
+            text_emb = self.encoder.word_emb(text) #TODO: !FIXME change text_emb to enc_out
             attn_soft, attn_logprob = self.aligner(
                 spec,
                 text_emb.permute(0, 2, 1),
