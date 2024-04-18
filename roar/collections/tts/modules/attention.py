@@ -1,32 +1,31 @@
-from typing import Optional, TypedDict
-from collections import namedtuple
+from typing import Optional, Tuple, Iterable
 
+import warnings
+
+import math
 import torch
 import torch.nn as nn
+from einops import rearrange
+from xformers.ops import SwiGLU
 import torch.nn.functional as F
+from lightning_utilities.core.imports import RequirementCache
 
 from roar.collections.tts.modules.submodules import (
-    ConditionalInput,
     ConditionalLayerNorm,
-    LinearNorm,
+    ConditionalRMSNorm,
+)
+from roar.collections.nlp.parts.submodules.positional_encodings import (
+    apply_rotary_emb_func,
+)
+from roar.collections.tts.parts.utils.bert_padding import (
+    pad_input,
+    unpad_input_only,
+    index_first_axis,
 )
 
-from roar.collections.tts.parts.utils.helpers import get_mask_from_lengths
-from roar.core.classes import NeuralModule, adapter_mixins, typecheck
-from roar.core.neural_types.elements import (
-    EncodedRepresentation,
-    LengthsType,
-    MaskType,
-    TokenIndex,
-)
-from roar.core.neural_types.neural_type import NeuralType
-from roar.utils import logging
+HAVE_FLASH = RequirementCache("flash-attn>=2.0.0.post1")
 
-HAVE_FLASH = True
-try:
-    from flash_attn import flash_attn_qkvpacked_func
-except ImportError:
-    HAVE_FLASH = False
+RoPECache = Tuple[torch.Tensor, torch.Tensor]
 
 
 # Multi Head Self Attention, may use flash attention or memory efficient attention
@@ -40,7 +39,7 @@ class MultiHeadAttn(nn.Module):
         dropatt=0.1,
         pre_lnorm=False,
         condition_types=[],
-        **kwargs
+        **kwargs,
     ):
         super(MultiHeadAttn, self).__init__()
 
@@ -106,68 +105,210 @@ class MultiHeadAttn(nn.Module):
         return output
 
 
-class MultiHeadAttnFlash(nn.Module):
+# class MultiHeadAttnFlash(nn.Module):
+#     def __init__(
+#         self,
+#         n_head,
+#         d_model,
+#         d_head,
+#         dropout,
+#         dropatt=0.1,
+#         pre_lnorm=False,
+#         condition_types=[],
+#     ):
+#         super(MultiHeadAttn, self).__init__()
+
+#         self.n_head = n_head
+#         self.d_model = d_model
+#         self.d_head = d_head
+#         self.scale = 1 / (d_head**0.5)
+#         self.pre_lnorm = pre_lnorm
+
+#         self.qkv_net = nn.Linear(d_model, 3 * n_head * d_head)
+#         self.drop = nn.Dropout(dropout)
+#         self.dropatt = dropatt
+#         self.o_net = nn.Linear(n_head * d_head, d_model, bias=False)
+#         self.layer_norm = ConditionalLayerNorm(
+#             d_model, condition_dim=d_model, condition_types=condition_types
+#         )
+
+#     def forward(self, inp, attn_mask=None, conditioning=None):
+#         if attn_mask:
+#             logging.warning(
+#                 "Attention mask is not supported for flash attention. Not using the mask for now."
+#             )
+#         return self._forward(inp, conditioning)
+
+#     def _forward(self, inp, conditioning=None):
+#         residual = inp
+#         if self.pre_lnorm:
+#             # layer normalization
+#             inp = self.layer_norm(inp, conditioning)
+
+#         n_head, d_head = self.n_head, self.d_head
+#         qkv = self.qkv_net(inp)
+#         qkv = qkv.view(inp.size(0), inp.size(1), 3, n_head, d_head)
+
+#         attn_vec = flash_attn_qkvpacked_func(qkv, self.dropatt)
+
+#         attn_vec = attn_vec.view(n_head, inp.size(0), inp.size(1), d_head)
+#         attn_vec = (
+#             attn_vec.permute(1, 2, 0, 3)
+#             .contiguous()
+#             .view(inp.size(0), inp.size(1), n_head * d_head)
+#         )
+
+#         # linear projection
+#         attn_out = self.o_net(attn_vec)
+#         attn_out = self.drop(attn_out)
+
+#         if self.pre_lnorm:
+#             # residual connection
+#             output = residual + attn_out
+#         else:
+#             # residual connection + layer normalization
+#             output = self.layer_norm(residual + attn_out, conditioning)
+
+#         return output
+
+
+class BiDirectionalLLaMaSelfAttention(nn.Module):
     def __init__(
         self,
         n_head,
         d_model,
         d_head,
         dropout,
-        dropatt=0.1,
-        pre_lnorm=False,
-        condition_types=[],
+        n_query_groups: Optional[int] = None,
+        pre_lnorm: bool = True,
+        condition_types: Iterable[str] = [],
     ):
-        super(MultiHeadAttn, self).__init__()
-
         self.n_head = n_head
         self.d_model = d_model
         self.d_head = d_head
-        self.scale = 1 / (d_head**0.5)
+        self.n_query_groups = n_query_groups
         self.pre_lnorm = pre_lnorm
 
-        self.qkv_net = nn.Linear(d_model, 3 * n_head * d_head)
+        shape = (self.n_head + self.n_query_groups * 2) * self.d_head
+        self.qkv_net = nn.Linear(self.d_model, shape)
         self.drop = nn.Dropout(dropout)
-        self.dropatt = dropatt
-        self.o_net = nn.Linear(n_head * d_head, d_model, bias=False)
-        self.layer_norm = ConditionalLayerNorm(
-            d_model, condition_dim=d_model, condition_types=condition_types
+        # self.o_net = nn.Linear(self.n_head * self.d_head, self.d_model)
+        self.o_net = SwiGLU(self.n_head * self.d_head, self.d_model)
+        self.norm_1 = ConditionalRMSNorm(
+            self.d_model, self.d_model, condition_types=condition_types
         )
-
-    def forward(self, inp, attn_mask=None, conditioning=None):
-        if attn_mask:
-            logging.warning(
-                "Attention mask is not supported for flash attention. Not using the mask for now."
+        self.norm_2 = ConditionalRMSNorm(
+            self.d_model, self.d_model, condition_types=condition_types
+        )
+        if not HAVE_FLASH:
+            warnings.warn(
+                "Unable to import flash attention. Defaulting to pytorch implementation. This will reduce the throughput of the model"
             )
-        return self._forward(inp, conditioning)
 
-    def _forward(self, inp, conditioning=None):
-        residual = inp
+    def forward(
+        self,
+        inp: torch.Tensor,
+        rope: RoPECache,
+        cu_seqlens: torch.Tensor,
+        max_seq_length: int,
+        subset_idx: Optional[torch.Tensor],
+        indices: Optional[torch.Tensor],
+        attn_mask: Optional[torch.Tensor] = None,
+        conditioning: Optional[torch.Tensor] = None,
+    ):
+        B, T, C = inp.size()
+
+        if subset_idx is not None:
+            residual = index_first_axis(inp, subset_idx)
+        else:
+            residual = inp
+
         if self.pre_lnorm:
             # layer normalization
-            inp = self.layer_norm(inp, conditioning)
+            inp = self.norm_1(inp, conditioning)
 
-        n_head, d_head = self.n_head, self.d_head
         qkv = self.qkv_net(inp)
-        qkv = qkv.view(inp.size(0), inp.size(1), 3, n_head, d_head)
+        qkv = pad_input(qkv, indices, cu_seqlens.shape[0] - 1, max_seq_length)
 
-        attn_vec = flash_attn_qkvpacked_func(qkv, self.dropatt)
+        q_per_kv = self.config.n_head // self.config.n_query_groups
+        # total_qkv = q_per_kv + 2
 
-        attn_vec = attn_vec.view(n_head, inp.size(0), inp.size(1), d_head)
-        attn_vec = (
-            attn_vec.permute(1, 2, 0, 3)
-            .contiguous()
-            .view(inp.size(0), inp.size(1), n_head * d_head)
+        qkv = rearrange(
+            qkv, "b t (h s d) -> b t h s d", h=self.n_query_groups, d=self.d_head
         )
+        # qkv = qkv.view(
+        #     B, T, self.config.n_query_groups, total_qkv, self.d_head
+        # )
 
-        # linear projection
-        attn_out = self.o_net(attn_vec)
-        attn_out = self.drop(attn_out)
+        # split batched computation into three
+        q, k, v = qkv.split((q_per_kv, 1, 1), dim=-2)
+
+        q = rearrange(q, "b t s 1 d -> b t s d")
+        k = rearrange(k, "b t s 1 d -> b t s d")
+        v = rearrange(v, "b t s 1 d -> b t s d")
+
+        cos, sin = rope
+
+        q = apply_rotary_emb_func(q, cos, sin, False, False)
+        k = apply_rotary_emb_func(k, cos, sin, False, False)
+
+        attn_vec = self.scaled_dot_product_attention(q, k, v, mask=attn_mask)
+
+        attn_vec = unpad_input_only(attn_vec, torch.squeeze(attn_mask) == 1)
+
+        attn_vec = rearrange(attn_vec, "... h d -> ... (h d)")
 
         if self.pre_lnorm:
             # residual connection
-            output = residual + attn_out
+            intermidiate = self.norm_2(residual + attn_vec, conditioning)
         else:
             # residual connection + layer normalization
-            output = self.layer_norm(residual + attn_out, conditioning)
+            intermidiate = self.norm_1(residual + attn_vec, conditioning)
+
+        if subset_idx is not None:
+            attn_out = self.o_net(index_first_axis(intermidiate, subset_idx))
+        else:
+            attn_out = self.o_net(intermidiate)
+
+        attn_out = self.dropout(attn_out)
+
+        if self.pre_lnorm:
+            # residual connection
+            output = intermidiate + attn_out
+        else:
+            # residual connection + layer normalization
+            output = self.norm_2(intermidiate + attn_out, conditioning)
 
         return output
+
+    def scaled_dot_product_attention(
+        self,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        mask: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        scale = 1.0 / math.sqrt(self.d_head)
+
+        if (
+            HAVE_FLASH
+            # and mask is None
+            and q.device.type == "cuda"
+            and q.dtype in (torch.float16, torch.bfloat16)
+        ):
+            from flash_attn import flash_attn_func
+
+            return flash_attn_func(
+                q, k, v, dropout_p=0.0, softmax_scale=scale, causal=False
+            )
+
+        q = q.transpose(1, 2)
+        k = k.transpose(1, 2)
+        v = v.transpose(1, 2)
+        if q.size() != k.size():
+            k = k.repeat_interleave(q.shape[1] // k.shape[1], dim=1)
+            v = v.repeat_interleave(q.shape[1] // v.shape[1], dim=1)
+        y = torch.nn.functional.scaled_dot_product_attention(
+            q, k, v, attn_mask=mask, dropout_p=0.0, scale=scale, is_causal=mask is None
+        )
+        return y.transpose(1, 2)

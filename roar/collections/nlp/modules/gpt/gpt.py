@@ -28,6 +28,7 @@ def build_mask_cache(max_seq_length: int, device: torch.device) -> torch.Tensor:
 def build_rope_cache(
     seq_len: int,
     n_elem: int,
+    dtype: torch.dtype,
     device: torch.device,
     base: int = 10000,
     condense_ratio: int = 1,
@@ -50,12 +51,12 @@ def build_rope_cache(
     cos, sin = torch.cos(idx_theta), torch.sin(idx_theta)
 
     # added by peiyuan to ensure same data type with q, k, to use fused rotary embedding
-    # if dtype == torch.bfloat16:
-    #     return cos.bfloat16(), sin.bfloat16()
+    if dtype == torch.bfloat16:
+        return cos.bfloat16(), sin.bfloat16()
     # ptl takes care of type casting
     # this is to mimic the behaviour of complex32, else we will get different results
-    # if cos.dtype in (torch.float16, torch.bfloat16, torch.int8):
-    #     return cos.half(), sin.half()
+    if cos.dtype in (torch.float16, torch.bfloat16, torch.int8):
+        return cos.half(), sin.half()
     return cos, sin
 
 
@@ -69,7 +70,7 @@ class GPT(NeuralModule):
         rope_base: int = 10000,
         n_head: int = 8,
         rope_condense_ratio: float = 1.0,
-        rotary_percentage: int = 1,
+        rotary_percentage: int = 0.25,
         norm_class: nn.Module = FusedRMSNorm,
         norm_eps: float = 1e-5,
         lm_head_bias: bool = False,
@@ -191,14 +192,11 @@ class GPT(NeuralModule):
         x = self.transformer.ln_f(x)
         return self.lm_head(x)  # (b, t, vocab_size)
 
-    @classmethod
-    def from_name(cls, name: str, **kwargs: Any) -> Self:
-        return cls(Config.from_name(name, **kwargs))
-
     def build_rope_cache(self, idx: "torch.tensor") -> RoPECache:
         return build_rope_cache(
             seq_len=self.block_size,
             n_elem=int(self.config.rotary_percentage * self.config.head_size),
+            dtype=idx.dtype,
             condense_ratio=self.config.rope_condense_ratio,
             device=idx.device,
             base=self.config.rope_base,
@@ -279,7 +277,7 @@ class CausalSelfAttention(nn.Module):
         # qkv = qkv.permute(0, 2, 3, 1, 4)  # (B, n_query_groups, total_qkv, T, hs)
 
         # split batched computation into three
-        q, k, v = qkv.split((q_per_kv, 1, 1), dim=2)
+        q, k, v = qkv.split((q_per_kv, 1, 1), dim=-2)
 
         # maybe repeat k and v if for the non multi-head attention cases
         # training: flash attention requires it
