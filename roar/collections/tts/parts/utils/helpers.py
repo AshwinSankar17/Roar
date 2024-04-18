@@ -702,6 +702,29 @@ def slice_segments(x, ids_str, segment_size=4):
     return ret
 
 
+def get_segments(
+    x: torch.Tensor,
+    start_idxs: torch.Tensor,
+    segment_size: int,
+) -> torch.Tensor:
+    """Get segments.
+
+    Args:
+        x (Tensor): Input tensor (B, C, T).
+        start_idxs (Tensor): Start index tensor (B,).
+        segment_size (int): Segment size.
+
+    Returns:
+        Tensor: Segmented tensor (B, C, segment_size).
+
+    """
+    b, c, t = x.size()
+    segments = x.new_zeros(b, c, segment_size)
+    for i, start_idx in enumerate(start_idxs):
+        segments[i] = x[i, :, start_idx : start_idx + segment_size]
+    return segments
+
+
 def rand_slice_segments(x, x_lengths=None, segment_size=4):
     """
     Chooses random indices and slices segments from batch
@@ -717,6 +740,34 @@ def rand_slice_segments(x, x_lengths=None, segment_size=4):
     ret = slice_segments(x, ids_str, segment_size)
 
     return ret, ids_str
+
+
+def get_random_segments(
+    x: torch.Tensor,
+    x_lengths: torch.Tensor,
+    segment_size: int,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """Get random segments.
+
+    Args:
+        x (Tensor): Input tensor (B, C, T).
+        x_lengths (Tensor): Length tensor (B,).
+        segment_size (int): Segment size.
+
+    Returns:
+        Tensor: Segmented tensor (B, C, segment_size).
+        Tensor: Start index tensor (B,).
+
+    """
+    b, c, t = x.size()
+    max_start_idx = x_lengths - segment_size
+    max_start_idx[max_start_idx < 0] = 0
+    start_idxs = (torch.rand([b]).to(x.device) * max_start_idx).to(
+        dtype=torch.long,
+    )
+    segments = get_segments(x, start_idxs, segment_size)
+
+    return segments, start_idxs
 
 
 def clip_grad_value_(parameters, clip_value, norm_type=2):
@@ -945,60 +996,6 @@ def g2p_backward_compatible_support(g2p_target: str) -> str:
     return g2p_target_new
 
 
-def get_random_segments(
-    x: torch.Tensor,
-    x_lengths: torch.Tensor,
-    segment_size: int,
-) -> Tuple[torch.Tensor, torch.Tensor]:
-    """Get random segments.
-
-    Args:
-        x (Tensor): Input tensor (B, C, T).
-        x_lengths (Tensor): Length tensor (B,).
-        segment_size (int): Segment size.
-
-    Returns:
-        Tensor: Segmented tensor (B, C, segment_size).
-        Tensor: Start index tensor (B,).
-
-    """
-    b, c, t = x.size()
-    max_start_idx = x_lengths - segment_size
-    max_start_idx[max_start_idx < 0] = 0
-    start_idxs = (torch.rand([b]).to(x.device) * max_start_idx).to(
-        dtype=torch.long,
-    )
-    segments = get_segments(x, start_idxs, segment_size)
-
-    return segments, start_idxs
-
-
-def get_segments(
-    x: torch.Tensor,
-    start_idxs: torch.Tensor,
-    segment_size: int,
-) -> torch.Tensor:
-    """Get segments.
-
-    Args:
-        x (Tensor): Input tensor (B, C, T).
-        start_idxs (Tensor): Start index tensor (B,).
-        segment_size (int): Segment size.
-
-    Returns:
-        Tensor: Segmented tensor (B, C, segment_size).
-
-    """
-    b, c, t = x.size()
-    segments = x.new_zeros(b, c, segment_size)
-    for i, start_idx in enumerate(start_idxs):
-        segments[i] = x[i, :, start_idx : start_idx + segment_size]
-    return segments
-
-
-RoPECache = Tuple[torch.Tensor, torch.Tensor]
-
-
 def build_rope_cache(
     seq_len: int,
     n_elem: int,
@@ -1006,7 +1003,7 @@ def build_rope_cache(
     device: torch.device,
     base: int = 10000,
     condense_ratio: int = 1,
-) -> RoPECache:
+):
     """Enhanced Transformer with Rotary Position Embedding.
 
     Derived from: https://github.com/labmlai/annotated_deep_learning_paper_implementations/blob/master/labml_nn/
