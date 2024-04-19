@@ -355,10 +355,9 @@ class JETSModule(NeuralModule, adapter_mixins.AdapterModuleMixin):
 
         attn_soft, attn_hard, attn_hard_dur, attn_logprob = None, None, None, None
         if self.learn_alignment and spec is not None:
-            text_emb = self.encoder.word_emb(text) #TODO: !FIXME change text_emb to enc_out
             attn_soft, attn_logprob = self.aligner(
                 spec,
-                text_emb.permute(0, 2, 1),
+                enc_out.permute(0, 2, 1),
                 enc_mask == 0,
                 attn_prior,
                 conditioning=spk_emb,

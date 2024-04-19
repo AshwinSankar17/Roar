@@ -167,7 +167,7 @@ class IndicCharsTokenizer(BaseCharsTokenizer):
         ',', '.', '!', '?', '-',
         ':', ';', '/', '"', '(',
         ')', '[', ']', '{', '}', 
-        '%', '$', '#',
+        '%', '$', '#', "'"
     )
     # fmt: on
 
@@ -336,6 +336,42 @@ class HindiCharsTokenizer(IndicCharsTokenizer):
 
 class BengaliCharsTokenizer(IndicCharsTokenizer):
     UNICODE_RANGE = ("\u0980", "\u09FF")
+
+    def __init__(
+        self,
+        punct=True,
+        apostrophe=True,
+        add_blank_at=None,
+        pad_with_space=False,
+        non_default_punct_list=None,
+        process_mixed_language_chars=True,
+        text_preprocessing_func=any_locale_text_preprocessing,
+    ):
+        """Hindi char-based tokenizer.
+        Args:
+            punct: Whether to reserve grapheme for basic punctuation or not.
+            apostrophe: Whether to use apostrophe or not.
+            add_blank_at: Add blank to labels in the specified order ("last") or after tokens (any non None),
+                if None then no blank in labels.
+            pad_with_space: Whether to pad text with spaces at the beginning and at the end or not.
+            non_default_punct_list: List of punctuation marks which will be used instead default.
+            process_mixed_language_chars: Boolean flag indicating whether or not to process mixed language chars.
+            text_preprocessing_func: Text preprocessing function for correct execution of the tokenizer.
+                Basically, it replaces all non-unicode characters with unicode ones and apply lower() function.
+        """
+        super().__init__(
+            unicode_range=self.UNICODE_RANGE,
+            punct=punct,
+            apostrophe=apostrophe,
+            add_blank_at=add_blank_at,
+            pad_with_space=pad_with_space,
+            non_default_punct_list=non_default_punct_list,
+            process_mixed_language_chars=process_mixed_language_chars,
+            text_preprocessing_func=text_preprocessing_func,
+        )
+        
+class MalayalamCharsTokenizer(IndicCharsTokenizer):
+    UNICODE_RANGE = ("\u0D00", "\u0D7F")
 
     def __init__(
         self,

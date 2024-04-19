@@ -11,7 +11,6 @@ from roar.collections.tts.modules.submodules import (
 )
 from roar.collections.tts.modules.attention import (
     MultiHeadAttn,
-    MultiHeadAttnFlash,
     MultiHeadCrossAttn,
 )
 from roar.collections.tts.modules.postional_embedding import PositionalEmbedding
@@ -114,18 +113,6 @@ class TransformerLayer(nn.Module, adapter_mixins.AdapterModuleMixin):
     ):  # TODO: add flash attention support for transformer
         super(TransformerLayer, self).__init__()
         AttentionBlock = MultiHeadAttn
-        if kwargs.get("use_flash", False):
-            if not HAVE_FLASH:
-                logging.warning(
-                    "Flash attention is not available. Falling back to regular attn."
-                )
-            elif not is_gpu_ampere_or_newer():
-                logging.warning(
-                    "Flash attention is only available on Ampere or newer GPUs. Falling back to regular attn."
-                )
-            else:
-                AttentionBlock = MultiHeadAttnFlash
-
         self.dec_attn = AttentionBlock(
             n_head, d_model, d_head, dropout, condition_types=condition_types, **kwargs
         )
