@@ -1,25 +1,29 @@
-from typing import Optional, Tuple
+import warnings
+from typing import Optional, Tuple, Iterable
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
+
+from xformers.ops import SwiGLU
+from lightning_utilities.core.imports import RequirementCache
 
 from roar.collections.tts.modules.submodules import (
     ConditionalInput,
     ConditionalLayerNorm,
+    ConditionalRMSNorm,
     LinearNorm,
 )
-from roar.collections.tts.modules.attention import (
-    MultiHeadAttn,
-    MultiHeadAttnFlash,
-    BiDirectionalLLaMaSelfAttention,
-)
+from roar.collections.tts.modules.attention import MultiHeadAttn, FlashSelfAttention
 from roar.collections.tts.modules.postional_embedding import PositionalEmbedding
 from roar.collections.tts.parts.utils.helpers import (
     get_mask_from_lengths,
     build_rope_cache,
 )
-from roar.collections.tts.parts.utils.bert_padding import unpad_input, pad_input
+from roar.collections.tts.parts.utils.bert_padding import (
+    unpad_input,
+    pad_input,
+    index_first_axis,
+)
 from roar.core.classes import NeuralModule, adapter_mixins, typecheck
 from roar.core.neural_types.elements import (
     EncodedRepresentation,
@@ -28,15 +32,8 @@ from roar.core.neural_types.elements import (
     TokenIndex,
 )
 from roar.core.neural_types.neural_type import NeuralType
-from roar.utils.gpu_utils import is_gpu_ampere_or_newer
-from roar.utils import logging
 
-HAVE_FLASH = True
-try:
-    from flash_attn import flash_attn_qkvpacked_func
-except ImportError:
-    HAVE_FLASH = False
-
+HAVE_FLASH = RequirementCache("flash-attn>=2.0.0.post1")
 RoPECache = Tuple[torch.Tensor, torch.Tensor]
 
 
@@ -120,17 +117,6 @@ class TransformerLayer(nn.Module, adapter_mixins.AdapterModuleMixin):
     ):  # TODO: add flash attention support for transformer
         super(TransformerLayer, self).__init__()
         AttentionBlock = MultiHeadAttn
-        if kwargs.get("use_flash", False):
-            if not HAVE_FLASH:
-                logging.warning(
-                    "Flash attention is not available. Falling back to regular attn."
-                )
-            elif not is_gpu_ampere_or_newer():
-                logging.warning(
-                    "Flash attention is only available on Ampere or newer GPUs. Falling back to regular attn."
-                )
-            else:
-                AttentionBlock = MultiHeadAttnFlash
 
         self.dec_attn = AttentionBlock(
             n_head, d_model, d_head, dropout, condition_types=condition_types, **kwargs
@@ -348,6 +334,91 @@ class FFTransformer(nn.Module):
         return out
 
 
+class BiLLaMaLayer(nn.Module):
+    def __init__(
+        self,
+        n_head,
+        d_model,
+        d_head,
+        dropout,
+        n_query_groups: Optional[int] = None,
+        pre_lnorm: bool = True,
+        condition_types: Iterable[str] = [],
+    ):
+        super(BiLLaMaLayer, self).__init__()
+        self.attention = FlashSelfAttention(
+            n_head, d_model, d_head, dropout, n_query_groups
+        )
+        self.pre_lnorm = pre_lnorm
+
+        self.drop = nn.Dropout(dropout)
+        # self.o_net = nn.Linear(self.n_head * self.d_head, self.d_model)
+        self.o_net = SwiGLU(self.n_head * self.d_head, self.d_model)
+        self.norm_1 = ConditionalRMSNorm(
+            self.d_model, self.d_model, condition_types=condition_types
+        )
+        self.norm_2 = ConditionalRMSNorm(
+            self.d_model, self.d_model, condition_types=condition_types
+        )
+        if not HAVE_FLASH:
+            warnings.warn(
+                "Unable to import flash attention. Defaulting to pytorch implementation. This will reduce the throughput of the model"
+            )
+
+    def forward(
+        self,
+        inp: torch.Tensor,
+        rope: RoPECache,
+        cu_seqlens: torch.Tensor,
+        max_seq_length: int,
+        subset_idx: Optional[torch.Tensor],
+        indices: Optional[torch.Tensor],
+        attn_mask: Optional[torch.Tensor] = None,
+        conditioning: Optional[torch.Tensor] = None,
+    ):
+        if subset_idx is not None:
+            residual = index_first_axis(inp, subset_idx)
+        else:
+            residual = inp
+
+        if self.pre_lnorm:
+            # layer normalization
+            inp = self.norm_1(inp, conditioning)
+
+        attn_vec = self.attention(
+            inp,
+            rope,
+            cu_seqlens,
+            max_seq_length,
+            subset_idx,
+            indices,
+            attn_mask=attn_mask,
+            conditioning=conditioning,
+        )
+        if self.pre_lnorm:
+            # residual connection
+            intermidiate = self.norm_2(residual + attn_vec, conditioning)
+        else:
+            # residual connection + layer normalization
+            intermidiate = self.norm_1(residual + attn_vec, conditioning)
+
+        if subset_idx is not None:
+            attn_out = self.o_net(index_first_axis(intermidiate, subset_idx))
+        else:
+            attn_out = self.o_net(intermidiate)
+
+        attn_out = self.dropout(attn_out)
+
+        if self.pre_lnorm:
+            # residual connection
+            output = intermidiate + attn_out
+        else:
+            # residual connection + layer normalization
+            output = self.norm_2(intermidiate + attn_out, conditioning)
+
+        return output
+
+
 class FlashTransformerLayer(nn.Module):
     def __init__(
         self,
@@ -363,7 +434,7 @@ class FlashTransformerLayer(nn.Module):
     ):
         super(FlashTransformerLayer, self).__init__()
 
-        self.dec_attn = BiDirectionalLLaMaSelfAttention(
+        self.dec_attn = BiLLaMaLayer(
             n_head,
             d_model,
             d_head,
@@ -462,7 +533,7 @@ class FlashTransformerDecoder(nn.Module):
             seq_len=inp.size(1),
             n_elem=int(self.rotary_percentage * self.d_head),
             dtype=inp.dtype,
-            device=self.device,
+            device=inp.device,
             base=self.rope_base,
             condense_ratio=self.condense_ratio,
         )

@@ -1,18 +1,14 @@
-from typing import Optional, Tuple, Iterable
-
-import warnings
+from typing import Optional, Tuple
 
 import math
 import torch
 import torch.nn as nn
 from einops import rearrange
-from xformers.ops import SwiGLU
 import torch.nn.functional as F
 from lightning_utilities.core.imports import RequirementCache
 
 from roar.collections.tts.modules.submodules import (
     ConditionalLayerNorm,
-    ConditionalRMSNorm,
 )
 from roar.collections.nlp.parts.submodules.positional_encodings import (
     apply_rotary_emb_func,
@@ -20,7 +16,6 @@ from roar.collections.nlp.parts.submodules.positional_encodings import (
 from roar.collections.tts.parts.utils.bert_padding import (
     pad_input,
     unpad_input_only,
-    index_first_axis,
 )
 
 HAVE_FLASH = RequirementCache("flash-attn>=2.0.0.post1")
@@ -105,105 +100,21 @@ class MultiHeadAttn(nn.Module):
         return output
 
 
-# class MultiHeadAttnFlash(nn.Module):
-#     def __init__(
-#         self,
-#         n_head,
-#         d_model,
-#         d_head,
-#         dropout,
-#         dropatt=0.1,
-#         pre_lnorm=False,
-#         condition_types=[],
-#     ):
-#         super(MultiHeadAttn, self).__init__()
-
-#         self.n_head = n_head
-#         self.d_model = d_model
-#         self.d_head = d_head
-#         self.scale = 1 / (d_head**0.5)
-#         self.pre_lnorm = pre_lnorm
-
-#         self.qkv_net = nn.Linear(d_model, 3 * n_head * d_head)
-#         self.drop = nn.Dropout(dropout)
-#         self.dropatt = dropatt
-#         self.o_net = nn.Linear(n_head * d_head, d_model, bias=False)
-#         self.layer_norm = ConditionalLayerNorm(
-#             d_model, condition_dim=d_model, condition_types=condition_types
-#         )
-
-#     def forward(self, inp, attn_mask=None, conditioning=None):
-#         if attn_mask:
-#             logging.warning(
-#                 "Attention mask is not supported for flash attention. Not using the mask for now."
-#             )
-#         return self._forward(inp, conditioning)
-
-#     def _forward(self, inp, conditioning=None):
-#         residual = inp
-#         if self.pre_lnorm:
-#             # layer normalization
-#             inp = self.layer_norm(inp, conditioning)
-
-#         n_head, d_head = self.n_head, self.d_head
-#         qkv = self.qkv_net(inp)
-#         qkv = qkv.view(inp.size(0), inp.size(1), 3, n_head, d_head)
-
-#         attn_vec = flash_attn_qkvpacked_func(qkv, self.dropatt)
-
-#         attn_vec = attn_vec.view(n_head, inp.size(0), inp.size(1), d_head)
-#         attn_vec = (
-#             attn_vec.permute(1, 2, 0, 3)
-#             .contiguous()
-#             .view(inp.size(0), inp.size(1), n_head * d_head)
-#         )
-
-#         # linear projection
-#         attn_out = self.o_net(attn_vec)
-#         attn_out = self.drop(attn_out)
-
-#         if self.pre_lnorm:
-#             # residual connection
-#             output = residual + attn_out
-#         else:
-#             # residual connection + layer normalization
-#             output = self.layer_norm(residual + attn_out, conditioning)
-
-#         return output
-
-
-class BiDirectionalLLaMaSelfAttention(nn.Module):
+class FlashSelfAttention(nn.Module):
     def __init__(
         self,
         n_head,
         d_model,
         d_head,
-        dropout,
         n_query_groups: Optional[int] = None,
-        pre_lnorm: bool = True,
-        condition_types: Iterable[str] = [],
     ):
         self.n_head = n_head
         self.d_model = d_model
         self.d_head = d_head
         self.n_query_groups = n_query_groups
-        self.pre_lnorm = pre_lnorm
 
         shape = (self.n_head + self.n_query_groups * 2) * self.d_head
         self.qkv_net = nn.Linear(self.d_model, shape)
-        self.drop = nn.Dropout(dropout)
-        # self.o_net = nn.Linear(self.n_head * self.d_head, self.d_model)
-        self.o_net = SwiGLU(self.n_head * self.d_head, self.d_model)
-        self.norm_1 = ConditionalRMSNorm(
-            self.d_model, self.d_model, condition_types=condition_types
-        )
-        self.norm_2 = ConditionalRMSNorm(
-            self.d_model, self.d_model, condition_types=condition_types
-        )
-        if not HAVE_FLASH:
-            warnings.warn(
-                "Unable to import flash attention. Defaulting to pytorch implementation. This will reduce the throughput of the model"
-            )
 
     def forward(
         self,
@@ -217,15 +128,6 @@ class BiDirectionalLLaMaSelfAttention(nn.Module):
         conditioning: Optional[torch.Tensor] = None,
     ):
         B, T, C = inp.size()
-
-        if subset_idx is not None:
-            residual = index_first_axis(inp, subset_idx)
-        else:
-            residual = inp
-
-        if self.pre_lnorm:
-            # layer normalization
-            inp = self.norm_1(inp, conditioning)
 
         qkv = self.qkv_net(inp)
         qkv = pad_input(qkv, indices, cu_seqlens.shape[0] - 1, max_seq_length)
@@ -258,28 +160,7 @@ class BiDirectionalLLaMaSelfAttention(nn.Module):
 
         attn_vec = rearrange(attn_vec, "... h d -> ... (h d)")
 
-        if self.pre_lnorm:
-            # residual connection
-            intermidiate = self.norm_2(residual + attn_vec, conditioning)
-        else:
-            # residual connection + layer normalization
-            intermidiate = self.norm_1(residual + attn_vec, conditioning)
-
-        if subset_idx is not None:
-            attn_out = self.o_net(index_first_axis(intermidiate, subset_idx))
-        else:
-            attn_out = self.o_net(intermidiate)
-
-        attn_out = self.dropout(attn_out)
-
-        if self.pre_lnorm:
-            # residual connection
-            output = intermidiate + attn_out
-        else:
-            # residual connection + layer normalization
-            output = self.norm_2(intermidiate + attn_out, conditioning)
-
-        return output
+        return attn_vec
 
     def scaled_dot_product_attention(
         self,
@@ -292,7 +173,6 @@ class BiDirectionalLLaMaSelfAttention(nn.Module):
 
         if (
             HAVE_FLASH
-            # and mask is None
             and q.device.type == "cuda"
             and q.dtype in (torch.float16, torch.bfloat16)
         ):
