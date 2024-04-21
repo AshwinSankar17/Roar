@@ -1,3 +1,7 @@
+"""
+Deprecated and moved to roar.collections.nlp.parts.submodules.positional_encodings
+"""
+
 # Copyright (c) 2023, Tri Dao.
 
 import math

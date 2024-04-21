@@ -174,7 +174,7 @@ class ModelPT(LightningModule, Model):
         # config has 1 item passed in a list
         if (
             self._validation_dl
-            and type(self._validation_dl) == list
+            and isinstance(self._validation_dl, list)
             and len(self._validation_dl) > 1
         ):
             for _ in range(len(self._validation_dl)):
@@ -182,7 +182,7 @@ class ModelPT(LightningModule, Model):
 
         # Initialize an empty list as sometimes self._test_dl can be None at this stage
         self.test_step_outputs = []
-        if self._test_dl and type(self._test_dl) == list and len(self._test_dl) > 1:
+        if self._test_dl and isinstance(self._test_dl, list) and len(self._test_dl) > 1:
             for _ in range(len(self._test_dl)):
                 self.test_step_outputs.append([])
         # ModelPT wrappers over subclass implementations
@@ -235,7 +235,7 @@ class ModelPT(LightningModule, Model):
             config_path (str): Artifact key. Usually corresponds to the model config.
             src (str): Path to artifact.
             verify_src_exists (bool): If set to False, then the artifact is optional and register_artifact will return None even if
-                                      src is not found. Defaults to True.
+                                        src is not found. Defaults to True.
 
         Returns:
             str: If src is not None or empty it always returns absolute path which is guaranteed to exist during model instance life
@@ -372,7 +372,7 @@ class ModelPT(LightningModule, Model):
     def save_to(self, save_path: str):
         """
         Saves model instance (weights and configuration) into .roar file
-         You can use "restore_from" method to fully restore instance from .roar file.
+            You can use "restore_from" method to fully restore instance from .roar file.
 
         .roar file is an archive (tar.gz) with the following:
             model_config.yaml - model configuration in .yaml format. You can deserialize this into cfg argument for model's constructor
@@ -670,18 +670,18 @@ class ModelPT(LightningModule, Model):
             if self.trainer.max_steps < 0:
                 # Store information needed to calculate max_steps
                 optim_config["sched"]["t_max_epochs"] = self._trainer.max_epochs
-                optim_config["sched"][
-                    "t_accumulate_grad_batches"
-                ] = self._trainer.accumulate_grad_batches
-                optim_config["sched"][
-                    "t_limit_train_batches"
-                ] = self._trainer.limit_train_batches
+                optim_config["sched"]["t_accumulate_grad_batches"] = (
+                    self._trainer.accumulate_grad_batches
+                )
+                optim_config["sched"]["t_limit_train_batches"] = (
+                    self._trainer.limit_train_batches
+                )
 
                 app_state = AppState()
                 if app_state.data_parallel_size is not None:
-                    optim_config["sched"][
-                        "t_num_workers"
-                    ] = app_state.data_parallel_size
+                    optim_config["sched"]["t_num_workers"] = (
+                        app_state.data_parallel_size
+                    )
                 elif app_state.model_parallel_size is None:
                     optim_config["sched"]["t_num_workers"] = (
                         self._trainer.num_devices * self._trainer.num_nodes
