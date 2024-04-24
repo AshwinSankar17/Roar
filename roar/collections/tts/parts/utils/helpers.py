@@ -725,7 +725,6 @@ def get_segments(
     return segments
 
 
-
 def rand_slice_segments(x, x_lengths=None, segment_size=4):
     """
     Chooses random indices and slices segments from batch
@@ -741,6 +740,7 @@ def rand_slice_segments(x, x_lengths=None, segment_size=4):
     ret = slice_segments(x, ids_str, segment_size)
 
     return ret, ids_str
+
 
 def get_random_segments(
     x: torch.Tensor,
@@ -994,3 +994,38 @@ def g2p_backward_compatible_support(g2p_target: str) -> str:
         "nemo_text_processing.g2p", "roar.collections.tts.g2p"
     )
     return g2p_target_new
+
+
+def build_rope_cache(
+    seq_len: int,
+    n_elem: int,
+    dtype: torch.dtype,
+    device: torch.device,
+    base: int = 10000,
+    condense_ratio: int = 1,
+):
+    """Enhanced Transformer with Rotary Position Embedding.
+
+    Derived from: https://github.com/labmlai/annotated_deep_learning_paper_implementations/blob/master/labml_nn/
+    transformers/rope/__init__.py. MIT License:
+    https://github.com/labmlai/annotated_deep_learning_paper_implementations/blob/master/license.
+    """
+    # $\Theta = {\theta_i = 10000^{\frac{2(i-1)}{d}}, i \in [1, 2, ..., \frac{d}{2}]}$
+    theta = 1.0 / (base ** (torch.arange(0, n_elem, 2, device=device) / n_elem))
+
+    # Create position indexes `[0, 1, ..., seq_len - 1]`
+    seq_idx = torch.arange(seq_len, device=device) / condense_ratio
+
+    # Calculate the product of position index and $\theta_i$
+    idx_theta = torch.outer(seq_idx, theta)
+
+    cos, sin = torch.cos(idx_theta), torch.sin(idx_theta)
+
+    # added by peiyuan to ensure same data type with q, k, to use fused rotary embedding
+    if dtype == torch.bfloat16:
+        return cos.bfloat16(), sin.bfloat16()
+    # ptl takes care of type casting
+    # this is to mimic the behaviour of complex32, else we will get different results
+    if cos.dtype in (torch.float16, torch.bfloat16, torch.int8):
+        return cos.half(), sin.half()
+    return cos, sin

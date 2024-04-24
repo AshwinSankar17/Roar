@@ -9,8 +9,8 @@ import torch
 import yaml
 from typing_extensions import Self
 
-import litgpt.model
-from litgpt.utils import find_multiple
+import roar.collections.nlp.modules.gpt.gpt as gpt
+from roar.collections.nlp.parts.utils import find_multiple
 
 
 @dataclass
@@ -137,7 +137,7 @@ class Config:
     @property
     def mlp_class(self) -> Type:
         # `self.mlp_class_name` cannot be the type to keep the config serializable
-        return getattr(litgpt.model, self.mlp_class_name)
+        return getattr(gpt, self.mlp_class_name)
 
     @property
     def norm_class(self) -> Type:
@@ -145,7 +145,7 @@ class Config:
         if self.norm_class_name == "RMSNorm":
             from functools import partial
 
-            from litgpt.model import RMSNorm
+            from roar.collections.nlp.modules.gpt.gpt import RMSNorm
 
             return partial(RMSNorm, add_unit_offset="Gemma" in self.name)
         return getattr(torch.nn, self.norm_class_name)

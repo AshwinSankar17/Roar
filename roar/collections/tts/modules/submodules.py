@@ -6,6 +6,8 @@ from torch.autograd import Variable
 from torch.nn import functional as F
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 
+from roar.collections.nlp.parts.submodules.normalization import FusedRMSNorm
+
 from roar.core.classes import NeuralModule, adapter_mixins
 from roar.core.neural_types.elements import (
     EncodedRepresentation,
@@ -499,6 +501,45 @@ class ConditionalLayerNorm(torch.nn.LayerNorm):
         check_support_condition_types(condition_types)
         self.condition = "layernorm" in condition_types
         super().__init__(hidden_dim, elementwise_affine=not self.condition)
+
+        if self.condition:
+            self.cond_weight = torch.nn.Linear(condition_dim, hidden_dim)
+            self.cond_bias = torch.nn.Linear(condition_dim, hidden_dim)
+            self.init_parameters()
+
+    def init_parameters(self):
+        torch.nn.init.constant_(self.cond_weight.weight, 0.0)
+        torch.nn.init.constant_(self.cond_weight.bias, 1.0)
+        torch.nn.init.constant_(self.cond_bias.weight, 0.0)
+        torch.nn.init.constant_(self.cond_bias.bias, 0.0)
+
+    def forward(self, inputs, conditioning=None):
+        inputs = super().forward(inputs)
+
+        # Normalize along channel
+        if self.condition:
+            if conditioning is None:
+                raise ValueError(
+                    """You should add additional data types as conditions (e.g. speaker id or reference audio) 
+                                and define speaker_encoder in your config."""
+                )
+
+            inputs = inputs * self.cond_weight(conditioning)
+            inputs = inputs + self.cond_bias(conditioning)
+
+        return inputs
+
+
+class ConditionalRMSNorm(FusedRMSNorm):
+    """
+    This module is used to condition FusedRMSNorm.
+    If we don't have any conditions, this will be a normal RMSNorm.
+    """
+
+    def __init__(self, hidden_dim, condition_dim=None, condition_types=[]):
+        check_support_condition_types(condition_types)
+        self.condition = "layernorm" in condition_types
+        super().__init__(hidden_dim)
 
         if self.condition:
             self.cond_weight = torch.nn.Linear(condition_dim, hidden_dim)
