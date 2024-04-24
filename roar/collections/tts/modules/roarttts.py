@@ -410,7 +410,7 @@ class JETSModule(NeuralModule, adapter_mixins.AdapterModuleMixin):
             len_regulated, dec_lens = regulate_len(durs_predicted, enc_out, pace)
         else:
             raise ValueError(
-                f"Something unexpected happened when 'spec' is not None and 'self.learn_alignment' is False."
+                "Something unexpected happened when 'spec' is not None and 'self.learn_alignment' is False."
             )
 
         # Output FFT

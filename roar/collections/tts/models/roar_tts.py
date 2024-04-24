@@ -21,7 +21,6 @@ from roar.collections.tts.losses.hifigan_losses import (
     FeatureMatchingLoss,
     GeneratorLoss,
     DiscriminatorLoss,
-    MelLoss,
 )
 from roar.collections.tts.losses.roarloss import MultiResolutionMelLoss
 from roar.collections.tts.models.base import TextToWaveform

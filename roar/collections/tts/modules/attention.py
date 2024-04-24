@@ -145,9 +145,9 @@ class FlashSelfAttention(nn.Module):
         # split batched computation into three
         q, k, v = qkv.split((q_per_kv, 1, 1), dim=-2)
 
-        q = rearrange(q, "b t s 1 d -> b t s d")
-        k = rearrange(k, "b t s 1 d -> b t s d")
-        v = rearrange(v, "b t s 1 d -> b t s d")
+        q = rearrange(q, "b t h 1 d -> b t h d")
+        k = rearrange(k, "b t h 1 d -> b t h d")
+        v = rearrange(v, "b t h 1 d -> b t h d")
 
         cos, sin = rope
 
@@ -236,9 +236,9 @@ class FlashCrossAttention(nn.Module):
         # split batched computation into three
         k, v = kv.split(1, dim=-2)
 
-        q = rearrange(q, "b t s 1 d -> b t s d")
-        k = rearrange(k, "b t s 1 d -> b t s d")
-        v = rearrange(v, "b t s 1 d -> b t s d")
+        # q = rearrange(q, "b t h 1 d -> b t h d")
+        k = rearrange(k, "b t h 1 d -> b t h d")
+        v = rearrange(v, "b t h 1 d -> b t h d")
 
         cos, sin = rope
 

@@ -13,7 +13,11 @@ from roar.collections.tts.modules.submodules import (
     ConditionalRMSNorm,
     LinearNorm,
 )
-from roar.collections.tts.modules.attention import MultiHeadAttn, FlashSelfAttention
+from roar.collections.tts.modules.attention import (
+    MultiHeadAttn,
+    FlashSelfAttention,
+    FlashCrossAttention,
+)
 from roar.collections.tts.modules.postional_embedding import PositionalEmbedding
 from roar.collections.tts.parts.utils.helpers import (
     get_mask_from_lengths,
@@ -264,7 +268,7 @@ class StyleAdaptiveTransformerDecoder(NeuralModule):
                 )
             )
             self.style_adapters.append(
-                MultiHeadCrossAttn(n_head, d_model, d_head, dropout, pre_lnorm),
+                FlashCrossAttention(n_head, d_model, d_head, dropout, pre_lnorm),
             )
 
     @property
@@ -642,7 +646,7 @@ class FlashTransformerDecoder(nn.Module):
 
     def _forward(self, inp, mask, conditioning, subset_mask):
         B, T, _ = inp.size()
-        if self.rope_cache is None or self.rope_cache[0].size(0) < T:
+        if self.rope_cache is None or self.rope_cache[0].size(1) < T:
             self.rope_cache = self.build_rope_cache(inp)
 
         inp = self.cond_input(inp, conditioning)

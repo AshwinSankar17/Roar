@@ -237,3 +237,10 @@ def load_state_dict_helper(
         raise RuntimeError(f"Unexpected keys: \n{unexpected_keys}")
 
     return model
+
+
+def find_multiple(n: int, k: int) -> int:
+    assert k > 0
+    if n % k == 0:
+        return n
+    return n + k - (n % k)
