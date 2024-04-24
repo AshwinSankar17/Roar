@@ -83,7 +83,7 @@ class BaseCharsTokenizer(BaseTokenizer):
     # TODO: unify definition of the default PUNCT_LIST and import from ipa_lexicon.py
     PUNCT_LIST = (  # Derived from LJSpeech and "/" additionally
         ',', '.', '!', '?', '-',
-        ':', ';', '/', '"', '(',
+        ':', ';', '/', '"', '(', "'",
         ')', '[', ']', '{', '}',
     )
     # fmt: on
@@ -167,7 +167,8 @@ class IndicCharsTokenizer(BaseCharsTokenizer):
         ',', '.', '!', '?', '-',
         ':', ';', '/', '"', '(',
         ')', '[', ']', '{', '}', 
-        '%', '$', '#', "'"
+        '%', '$', '#', "'", " ",
+        "–", 
     )
     # fmt: on
 
