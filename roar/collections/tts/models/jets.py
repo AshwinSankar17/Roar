@@ -125,6 +125,17 @@ class JETSModel(TextToWaveform, Exportable):
         self._tb_logger = None
         super().__init__(cfg=cfg, trainer=trainer)
 
+        self.gradient_clip_val = (
+            1000.0
+            if self.trainer.gradient_clip_val is None
+            else self.trainer.gradient_clip_val
+        )
+        self.gradient_clip_algorithm = (
+            "norm"
+            if self.trainer.gradient_clip_algorithm is None
+            else self.trainer.gradient_clip_algorithm
+        )
+
         self.bin_loss_warmup_epochs = cfg.get("bin_loss_warmup_epochs", 100)
         self.log_images = cfg.get("log_images", False)
         self.log_train_images = False
@@ -157,7 +168,9 @@ class JETSModel(TextToWaveform, Exportable):
             self.forward_sum_loss_fn = ForwardSumLoss(loss_scale=aligner_loss_scale)
             self.bin_loss_fn = BinLoss(loss_scale=aligner_loss_scale)
 
-        self.preprocessor = instantiate(self._cfg.preprocessor, highfreq=None, use_grads=True)
+        self.preprocessor = instantiate(
+            self._cfg.preprocessor, highfreq=None, use_grads=True
+        )
         input_fft = instantiate(self._cfg.input_fft, **input_fft_kwargs)
         output_fft = instantiate(self._cfg.output_fft)
         duration_predictor = instantiate(self._cfg.duration_predictor)
@@ -583,7 +596,6 @@ class JETSModel(TextToWaveform, Exportable):
         )
 
         # Train Discriminator
-        optim_d.zero_grad()
         mpd_score_real, mpd_score_gen, _, _ = self.mpd(
             y=audio_, y_hat=wavs_pred.detach()
         )
@@ -597,11 +609,18 @@ class JETSModel(TextToWaveform, Exportable):
             disc_real_outputs=msd_score_real, disc_generated_outputs=msd_score_gen
         )
         loss_d = loss_disc_msd + loss_disc_mpd
-        self.manual_backward(loss_d)
-        optim_d.step()
+        self.manual_backward(loss_d / self.trainer.accumulate_grad_batches)
+
+        self.clip_gradients(
+            optim_d,
+            gradient_clip_val=self.gradient_clip_val,
+            gradient_clip_algorithm=self.gradient_clip_algorithm,
+        )
+        if (batch_idx + 1) % self.trainer.accumulate_grad_batches == 0:
+            optim_d.step()
+            optim_d.zero_grad()
 
         # Train Generator
-        optim_g.zero_grad()
         mels_y, _ = self.preprocessor(  # get mel spectrogram for the audio segment
             audio_.squeeze(1),
             audio_lens,
@@ -611,9 +630,7 @@ class JETSModel(TextToWaveform, Exportable):
             audio_lens,
         )
 
-        mel_loss = (
-            self.mel_loss_fn(spect_predicted=mels_pred, spect_tgt=mels_y)
-        )
+        mel_loss = self.mel_loss_fn(spect_predicted=mels_pred, spect_tgt=mels_y)
         # mel_loss = torch.nn.functional.l1_loss(mels_pred, mels_y) * self.mel_loss_scale
         dur_loss = self.duration_loss_fn(
             log_durs_predicted=log_durs_pred, durs_tgt=durs, len=text_lens
@@ -640,7 +657,7 @@ class JETSModel(TextToWaveform, Exportable):
         )
         var_loss = pitch_loss + energy_loss + dur_loss  # variance predictors loss
         loss += var_loss
-        
+
         _, mpd_score_gen, fmap_mpd_real, fmap_mpd_gen = self.mpd(
             y=audio_, y_hat=wavs_pred
         )
@@ -660,10 +677,18 @@ class JETSModel(TextToWaveform, Exportable):
         loss_gen_mpd = loss_gen_mpd * self.adversarial_loss_scale
         loss_gen_msd = loss_gen_msd * self.adversarial_loss_scale
         loss_g = (loss_gen_msd + loss_gen_mpd) + (loss_fm_msd + loss_fm_mpd) + loss
-        self.manual_backward(loss_g)
-        optim_g.step()
 
-        self.update_lr()
+        self.manual_backward(loss_g / self.trainer.accumulate_grad_batches)
+
+        self.clip_gradients(
+            optim_g,
+            gradient_clip_val=self.gradient_clip_val,
+            gradient_clip_algorithm=self.gradient_clip_algorithm,
+        )
+        if (batch_idx + 1) % self.trainer.accumulate_grad_batches == 0:
+            optim_g.step()
+            optim_g.zero_grad()
+            self.update_lr()
 
         self.log("train/loss", loss)
         self.log("train/mel_loss", mel_loss)
@@ -877,9 +902,7 @@ class JETSModel(TextToWaveform, Exportable):
                 dataformats="HWC",
             )
             self.log_train_images = True
-        self.log(
-            "val/g_l1_loss", mel_loss, prog_bar=True, logger=False, sync_dist=True
-        )
+        self.log("val/g_l1_loss", mel_loss, prog_bar=True, logger=False, sync_dist=True)
         self.validation_step_outputs.clear()  # free memory)
 
     def _setup_train_dataloader(self, cfg):
