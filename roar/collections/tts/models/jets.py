@@ -125,16 +125,20 @@ class JETSModel(TextToWaveform, Exportable):
         self._tb_logger = None
         super().__init__(cfg=cfg, trainer=trainer)
 
-        self.gradient_clip_val = (
-            1000.0
-            if self.trainer.gradient_clip_val is None
-            else self.trainer.gradient_clip_val
-        )
-        self.gradient_clip_algorithm = (
-            "norm"
-            if self.trainer.gradient_clip_algorithm is None
-            else self.trainer.gradient_clip_algorithm
-        )
+        self.gradient_clip_val = 0.0
+        self.gradient_clip_algorithm = "norm"
+
+        if hasattr(self, "trainer"):
+            self.gradient_clip_val = (
+                1000.0
+                if self.trainer.gradient_clip_val is None
+                else self.trainer.gradient_clip_val
+            )
+            self.gradient_clip_algorithm = (
+                "norm"
+                if self.trainer.gradient_clip_algorithm is None
+                else self.trainer.gradient_clip_algorithm
+            )
 
         self.bin_loss_warmup_epochs = cfg.get("bin_loss_warmup_epochs", 100)
         self.log_images = cfg.get("log_images", False)
