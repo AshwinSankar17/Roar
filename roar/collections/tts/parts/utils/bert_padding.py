@@ -223,3 +223,19 @@ def pad_input(hidden_states, indices, batch, seqlen):
     # output[indices] = hidden_states
     output = index_put_first_axis(hidden_states, indices, batch * seqlen)
     return rearrange(output, "(b s) ... -> b s ...", b=batch)
+
+
+def unpad_input_only(
+    hidden_states: torch.Tensor,
+    attention_mask: torch.Tensor,
+) -> torch.Tensor:
+    """Like unpad_input, but only return the unpadded first tensor.
+    Save a small amount of overhead.
+    Arguments:
+        hidden_states: (batch, seqlen, ...)
+        attention_mask: (batch, seqlen), bool / int, 1 means valid and 0 means not valid.
+    Returns:
+        hidden_states: (total_nnz, ...), where total_nnz = number of tokens in selected in attention_mask.
+    """
+    indices = torch.nonzero(attention_mask.flatten(), as_tuple=False).flatten()
+    return index_first_axis(rearrange(hidden_states, "b s ... -> (b s) ..."), indices)
