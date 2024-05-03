@@ -51,6 +51,8 @@ class IndexPutFirstAxis(torch.autograd.Function):
         output = torch.zeros(
             first_axis_dim, *values.shape[1:], device=values.device, dtype=values.dtype
         )
+        # print("OUTPUT SHAPE", output.shape)
+        # print("VALUES SHAPE", values.shape)
         # TD [2022-03-04] For some reason torch.scatter is a bit faster than indexing.
         output[indices] = values
         # output.scatter_(0, repeat(indices, 'z -> z d', d=values.shape[1]), values)
@@ -221,6 +223,8 @@ def pad_input(hidden_states, indices, batch, seqlen):
     # dim = hidden_states.shape[-1]
     # output = torch.zeros((batch * seqlen), dim, device=hidden_states.device, dtype=hidden_states.dtype)
     # output[indices] = hidden_states
+    # print("HIDDEN STATES SHAPE", hidden_states.shape)
+    # print("INDEX FIRST AXIS SHAPE", batch, seqlen, batch * seqlen)
     output = index_put_first_axis(hidden_states, indices, batch * seqlen)
     return rearrange(output, "(b s) ... -> b s ...", b=batch)
 

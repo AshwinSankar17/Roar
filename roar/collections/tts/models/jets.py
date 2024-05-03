@@ -43,6 +43,7 @@ from roar.collections.tts.parts.utils.helpers import (
     get_batch_size,
     get_num_workers,
 )
+from roar.collections.nlp.parts.utils.utils_funcs import torch_dtype_from_precision
 from roar.core.classes import Exportable
 from roar.core.classes.common import PretrainedModelInfo, typecheck
 from roar.core.optim.lr_schedulers import compute_max_steps, prepare_lr_scheduler
@@ -123,22 +124,7 @@ class JETSModel(TextToWaveform, Exportable):
 
         self._parser = None
         self._tb_logger = None
-        super().__init__(cfg=cfg, trainer=trainer)
-
-        self.gradient_clip_val = 0.0
-        self.gradient_clip_algorithm = "norm"
-
-        if hasattr(self, "trainer"):
-            self.gradient_clip_val = (
-                1000.0
-                if self.trainer.gradient_clip_val is None
-                else self.trainer.gradient_clip_val
-            )
-            self.gradient_clip_algorithm = (
-                "norm"
-                if self.trainer.gradient_clip_algorithm is None
-                else self.trainer.gradient_clip_algorithm
-            )
+        super(JETSModel, self).__init__(cfg=cfg, trainer=trainer)
 
         self.bin_loss_warmup_epochs = cfg.get("bin_loss_warmup_epochs", 100)
         self.log_images = cfg.get("log_images", False)
@@ -175,8 +161,11 @@ class JETSModel(TextToWaveform, Exportable):
         self.preprocessor = instantiate(
             self._cfg.preprocessor, highfreq=None, use_grads=True
         )
-        input_fft = instantiate(self._cfg.input_fft, **input_fft_kwargs)
-        output_fft = instantiate(self._cfg.output_fft)
+        
+        dtype = torch_dtype_from_precision(self._trainer.precision) if self._trainer is not None else torch.bfloat16
+        
+        input_fft = instantiate(self._cfg.input_fft, **input_fft_kwargs, dtype=dtype)
+        output_fft = instantiate(self._cfg.output_fft, dtype=dtype)
         duration_predictor = instantiate(self._cfg.duration_predictor)
         pitch_predictor = instantiate(self._cfg.pitch_predictor)
         waveform_generator = instantiate(self._cfg.waveform_generator)
@@ -232,6 +221,22 @@ class JETSModel(TextToWaveform, Exportable):
 
         self.log_config = cfg.get("log_config", None)
         self.automatic_optimization = False
+        
+        self.gradient_clip_val = 0.0
+        self.gradient_clip_algorithm = "norm"
+        self.accumulate_grad_batches = 1
+        if hasattr(self, "trainer") and self.trainer is not None:
+            self.gradient_clip_val = (
+                1000.0
+                if self.trainer.gradient_clip_val is None
+                else self.trainer.gradient_clip_val
+            )
+            self.gradient_clip_algorithm = (
+                "norm"
+                if self.trainer.gradient_clip_algorithm is None
+                else self.trainer.gradient_clip_algorithm
+            )
+            # self.accumulate_grad_batches = torch.Tensor([self.trainer.accumulate_grad_batches]).to(self.device)
         # Adapter modules setup (from FastPitchAdapterModelMixin)
         # self.setup_adapters()
 
@@ -615,11 +620,11 @@ class JETSModel(TextToWaveform, Exportable):
         loss_d = loss_disc_msd + loss_disc_mpd
         self.manual_backward(loss_d / self.trainer.accumulate_grad_batches)
 
-        self.clip_gradients(
-            optim_d,
-            gradient_clip_val=self.gradient_clip_val,
-            gradient_clip_algorithm=self.gradient_clip_algorithm,
-        )
+        # self.clip_gradients(
+        #     optim_d,
+        #     gradient_clip_val=self.gradient_clip_val,
+        #     gradient_clip_algorithm=self.gradient_clip_algorithm,
+        # )
         if (batch_idx + 1) % self.trainer.accumulate_grad_batches == 0:
             optim_d.step()
             optim_d.zero_grad()
@@ -635,10 +640,12 @@ class JETSModel(TextToWaveform, Exportable):
         )
 
         mel_loss = self.mel_loss_fn(spect_predicted=mels_pred, spect_tgt=mels_y)
+        # print("MEL LOSS: ", mel_loss.dtype)
         # mel_loss = torch.nn.functional.l1_loss(mels_pred, mels_y) * self.mel_loss_scale
         dur_loss = self.duration_loss_fn(
             log_durs_predicted=log_durs_pred, durs_tgt=durs, len=text_lens
         )
+        # print("DUR LOSS: ", dur_loss.dtype)
         loss = mel_loss * self.mel_loss_scale
         if self.learn_alignment:
             ctc_loss = self.forward_sum_loss_fn(
@@ -660,6 +667,7 @@ class JETSModel(TextToWaveform, Exportable):
             energy_predicted=energy_pred, energy_tgt=energy_tgt, length=text_lens
         )
         var_loss = pitch_loss + energy_loss + dur_loss  # variance predictors loss
+        # print("VAR LOSS: ", var_loss.dtype)
         loss += var_loss
 
         _, mpd_score_gen, fmap_mpd_real, fmap_mpd_gen = self.mpd(
@@ -681,14 +689,20 @@ class JETSModel(TextToWaveform, Exportable):
         loss_gen_mpd = loss_gen_mpd * self.adversarial_loss_scale
         loss_gen_msd = loss_gen_msd * self.adversarial_loss_scale
         loss_g = (loss_gen_msd + loss_gen_mpd) + (loss_fm_msd + loss_fm_mpd) + loss
+        # print("G MSD: ", loss_gen_msd.dtype)
+        # print("G MPD: ", loss_gen_mpd.dtype)
+        # print("FM MSD: ", loss_fm_msd.dtype)
+        # print("FM MPD: ", loss_fm_mpd.dtype)
+        # print("LOSS G: ", loss_g.dtype)
+        # for i, out in enumerate(outs):
+        #     print(f"{i} DTYPE: {out.dtype}")
+        self.manual_backward(loss_g)
 
-        self.manual_backward(loss_g / self.trainer.accumulate_grad_batches)
-
-        self.clip_gradients(
-            optim_g,
-            gradient_clip_val=self.gradient_clip_val,
-            gradient_clip_algorithm=self.gradient_clip_algorithm,
-        )
+        # self.clip_gradients(
+        #     optim_g,
+        #     gradient_clip_val=self.gradient_clip_val,
+        #     gradient_clip_algorithm=self.gradient_clip_algorithm,
+        # )
         if (batch_idx + 1) % self.trainer.accumulate_grad_batches == 0:
             optim_g.step()
             optim_g.zero_grad()

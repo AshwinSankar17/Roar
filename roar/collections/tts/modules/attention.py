@@ -13,6 +13,7 @@ from roar.collections.tts.modules.submodules import (
 from roar.collections.nlp.parts.submodules.positional_encodings import (
     apply_rotary_emb_func,
 )
+# from flash_attn.layers.rotary import apply_rotary_emb_func
 from roar.collections.tts.parts.utils.bert_padding import (
     pad_input,
     unpad_input_only,
@@ -108,6 +109,7 @@ class FlashSelfAttention(nn.Module):
         d_head,
         n_query_groups: Optional[int] = None,
     ):
+        super(FlashSelfAttention, self).__init__()
         self.n_head = n_head
         self.d_model = d_model
         self.d_head = d_head
@@ -115,6 +117,7 @@ class FlashSelfAttention(nn.Module):
 
         shape = (self.n_head + self.n_query_groups * 2) * self.d_head
         self.qkv_net = nn.Linear(self.d_model, shape)
+        self.proj = nn.Linear(self.n_head * self.d_head, self.d_model)
 
     def forward(
         self,
@@ -127,14 +130,11 @@ class FlashSelfAttention(nn.Module):
         attn_mask: Optional[torch.Tensor] = None,
         conditioning: Optional[torch.Tensor] = None,
     ):
-        B, T, C = inp.size()
-
         qkv = self.qkv_net(inp)
-        qkv = pad_input(qkv, indices, cu_seqlens.shape[0] - 1, max_seq_length)
+        qkv = pad_input(qkv, indices, attn_mask.shape[0], max_seq_length)
 
-        q_per_kv = self.config.n_head // self.config.n_query_groups
+        q_per_kv = self.n_head // self.n_query_groups
         # total_qkv = q_per_kv + 2
-
         qkv = rearrange(
             qkv, "b t (h s d) -> b t h s d", h=self.n_query_groups, d=self.d_head
         )
@@ -148,19 +148,24 @@ class FlashSelfAttention(nn.Module):
         q = rearrange(q, "b t s 1 d -> b t s d")
         k = rearrange(k, "b t s 1 d -> b t s d")
         v = rearrange(v, "b t s 1 d -> b t s d")
-
+        # print("Q SHAPE", q.shape)
+        # print("K SHAPE", k.shape)
         cos, sin = rope
-
         q = apply_rotary_emb_func(q, cos, sin, False, False)
         k = apply_rotary_emb_func(k, cos, sin, False, False)
-
+        # q = rearrange(q, "b t (s d) -> b t s d", d=self.d_head)
+        # k = rearrange(k, "b t (s d) -> b t s d", d=self.d_head)
+        # print("Q SHAPE", q.shape)
+        # print("K SHAPE", k.shape)
         attn_vec = self.scaled_dot_product_attention(q, k, v, mask=attn_mask)
-
-        attn_vec = unpad_input_only(attn_vec, torch.squeeze(attn_mask) == 1)
+        # print("ATTENTION -> ATTENTION VEC ", attn_vec.shape)
+        # print("ATTENTION -> ATTENTION MASK ", attn_mask, attn_mask.shape)
+        # print("ATTENTION -> ATTENTION MASK ", torch.squeeze(attn_mask) == True, (torch.squeeze(attn_mask) == True).shape)
+        attn_vec = unpad_input_only(attn_vec, torch.squeeze(attn_mask) == True)
 
         attn_vec = rearrange(attn_vec, "... h d -> ... (h d)")
 
-        return attn_vec
+        return self.proj(attn_vec)
 
     def scaled_dot_product_attention(
         self,

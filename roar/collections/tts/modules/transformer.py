@@ -4,7 +4,8 @@ from typing import Optional, Tuple, Iterable
 import torch
 import torch.nn as nn
 
-from xformers.ops import SwiGLU
+# from xformers.ops import SwiGLU
+from einops import rearrange
 from lightning_utilities.core.imports import RequirementCache
 
 from roar.collections.tts.modules.submodules import (
@@ -24,6 +25,8 @@ from roar.collections.tts.parts.utils.bert_padding import (
     pad_input,
     index_first_axis,
 )
+from roar.collections.tts.parts.submodules import SwiGLU
+
 from roar.core.classes import NeuralModule, adapter_mixins, typecheck
 from roar.core.neural_types.elements import (
     EncodedRepresentation,
@@ -83,10 +86,10 @@ class PositionwiseConvFF(nn.Module):
     def _forward(self, inp, conditioning=None):
         if self.pre_lnorm:
             # layer normalization + positionwise feed-forward
-            core_out = inp.transpose(1, 2)
-            core_out = self.CoreNet(
-                self.layer_norm(core_out, conditioning).to(inp.dtype)
-            )
+            #TODO: FIXME
+            core_out = self.layer_norm(inp, conditioning).to(inp.dtype)
+            core_out = core_out.transpose(1, 2)
+            core_out = self.CoreNet(core_out)
             core_out = core_out.transpose(1, 2)
 
             # residual connection
@@ -160,6 +163,7 @@ class FFTransformerDecoder(NeuralModule):
         pre_lnorm=False,
         condition_types=[],
         use_flash=False,
+        dtype=None,
     ):
         super(FFTransformerDecoder, self).__init__()
         self.d_model = d_model
@@ -321,6 +325,7 @@ class FFTransformerEncoder(FFTransformerDecoder):
         padding_idx=0,
         condition_types=[],
         use_flash=False,
+        dtype=None,
     ):
         super(FFTransformerEncoder, self).__init__(
             n_layer,
@@ -427,14 +432,18 @@ class BiLLaMaLayer(nn.Module):
         condition_types: Iterable[str] = [],
     ):
         super(BiLLaMaLayer, self).__init__()
-        self.attention = FlashSelfAttention(
-            n_head, d_model, d_head, dropout, n_query_groups
-        )
+        self.n_head = n_head
+        self.d_model = d_model
+        self.d_head = d_head
         self.pre_lnorm = pre_lnorm
+        
+        self.attention = FlashSelfAttention(
+            n_head, d_model, d_head, n_query_groups
+        )
 
-        self.drop = nn.Dropout(dropout)
+        self.dropout = nn.Dropout(dropout)
         # self.o_net = nn.Linear(self.n_head * self.d_head, self.d_model)
-        self.o_net = SwiGLU(self.n_head * self.d_head, self.d_model)
+        self.o_net = SwiGLU(self.d_model, self.d_model)
         self.norm_1 = ConditionalRMSNorm(
             self.d_model, self.d_model, condition_types=condition_types
         )
@@ -460,12 +469,16 @@ class BiLLaMaLayer(nn.Module):
         if subset_idx is not None:
             residual = index_first_axis(inp, subset_idx)
         else:
-            residual = inp
-
+            residual = pad_input(inp, indices, attn_mask.shape[0], max_seq_length)
         if self.pre_lnorm:
             # layer normalization
+            inp = pad_input(inp, indices, attn_mask.shape[0], max_seq_length)
+            # print("CU SEQLENS ", cu_seqlens.shape)
+            # print("INP SHAPE ", inp.shape)
+            # print("conditioning SHAPE ", conditioning.shape)
             inp = self.norm_1(inp, conditioning)
-
+            inp, _, _, _ = unpad_input(inp, attn_mask)
+            
         attn_vec = self.attention(
             inp,
             rope,
@@ -478,10 +491,16 @@ class BiLLaMaLayer(nn.Module):
         )
         if self.pre_lnorm:
             # residual connection
+            attn_vec = pad_input(attn_vec, indices, attn_mask.shape[0], max_seq_length)
+            # print("ATTN VEC SHAPE ", attn_vec.shape)
+            # print("conditioning SHAPE ", conditioning.shape)
             intermidiate = self.norm_2(residual + attn_vec, conditioning)
+            # intermidiate, _, _, _ = unpad_input(intermidiate, attn_mask)
         else:
             # residual connection + layer normalization
+            attn_vec = pad_input(attn_vec, indices, attn_mask.shape[0], max_seq_length)
             intermidiate = self.norm_1(residual + attn_vec, conditioning)
+            # intermidiate, _, _, _ = unpad_input(intermidiate, attn_mask)
 
         if subset_idx is not None:
             attn_out = self.o_net(index_first_axis(intermidiate, subset_idx))
@@ -496,7 +515,7 @@ class BiLLaMaLayer(nn.Module):
         else:
             # residual connection + layer normalization
             output = self.norm_2(intermidiate + attn_out, conditioning)
-
+        output, *_ = unpad_input(output, attn_mask)
         return output
 
 
@@ -509,6 +528,7 @@ class FlashTransformerLayer(nn.Module):
         d_inner,
         kernel_size,
         dropout,
+        dropatt=0.0,
         n_query_groups=None,
         condition_types=[],
         pre_lnorm=True,
@@ -538,10 +558,11 @@ class FlashTransformerLayer(nn.Module):
         dec_inp: torch.Tensor,
         rope: RoPECache,
         cu_seqlens: torch.Tensor,
+        batch: int,
         max_seq_length: int,
         subset_idx: Optional[torch.Tensor],
         indices: Optional[torch.Tensor],
-        mask: Optional[torch.Tensor] = None,
+        attn_mask: Optional[torch.Tensor] = None,
         conditioning: Optional[torch.Tensor] = None,
     ):
         output = self.dec_attn(
@@ -551,15 +572,16 @@ class FlashTransformerLayer(nn.Module):
             max_seq_length,
             subset_idx,
             indices,
-            attn_mask=~mask.squeeze(2),
+            attn_mask=attn_mask,
             conditioning=conditioning,
         )
+        output = pad_input(output, indices, batch, max_seq_length)
         output = self.pos_ff(output, conditioning)
-
+        output, _, _, _ = unpad_input(output, attn_mask)
         return output
 
 
-class FlashTransformerDecoder(nn.Module):
+class FlashTransformerDecoder(NeuralModule):
     def __init__(
         self,
         n_layer,
@@ -576,11 +598,13 @@ class FlashTransformerDecoder(nn.Module):
         n_query_groups=None,
         condition_types=[],
         pre_lnorm=True,
+        dtype=None,
     ):
         super(FlashTransformerDecoder, self).__init__()
         self.d_model = d_model
         self.n_head = n_head
         self.d_head = d_head
+        self.dtype = dtype
 
         if n_query_groups is None:
             n_query_groups = n_head
@@ -613,10 +637,10 @@ class FlashTransformerDecoder(nn.Module):
         return build_rope_cache(
             seq_len=inp.size(1),
             n_elem=int(self.rotary_percentage * self.d_head),
-            dtype=inp.dtype,
+            dtype=self.dtype, #TODO: figure out a neat way to do this
             device=inp.device,
             base=self.rope_base,
-            condense_ratio=self.condense_ratio,
+            condense_ratio=self.rope_condense_ratio,
         )
 
     @property
@@ -627,18 +651,21 @@ class FlashTransformerDecoder(nn.Module):
             "conditioning": NeuralType(
                 ("B", "T", "D"), EncodedRepresentation(), optional=True
             ),
+            "subset_mask": NeuralType(
+                ("B", "T"), EncodedRepresentation(), optional=True
+            ),
         }
 
     @property
     def output_types(self):
         return {
             "out": NeuralType(("B", "T", "D"), EncodedRepresentation()),
-            "mask": NeuralType(("B", "T", "D"), MaskType()),
+            "mask": NeuralType(("B", "T"), MaskType()),
         }
 
     @typecheck()
-    def forward(self, input, seq_lens, conditioning=None):
-        return self._forward(input, mask_from_lens(seq_lens).unsqueeze(2), conditioning)
+    def forward(self, input, seq_lens, conditioning=None, subset_mask=None):
+        return self._forward(input, mask_from_lens(seq_lens), conditioning, subset_mask)
 
     def _forward(self, inp, mask, conditioning, subset_mask):
         B, T, _ = inp.size()
@@ -646,6 +673,7 @@ class FlashTransformerDecoder(nn.Module):
             self.rope_cache = self.build_rope_cache(inp)
 
         inp = self.cond_input(inp, conditioning)
+        # print("PRE UNPAD SHAPE ", inp.shape)
         out, indices, cu_seqlens, _ = unpad_input(inp, mask)
 
         cos, sin = self.rope_cache
@@ -657,19 +685,23 @@ class FlashTransformerDecoder(nn.Module):
                     out,
                     (cos, sin),
                     cu_seqlens,
+                    B,
                     T,
                     None,
                     indices,
                     attn_mask=mask,
                     conditioning=conditioning,
                 )
+            # print("PRE PAD", out.shape)
             out = pad_input(out, indices, B, T)
+            # print("POST PAD", out.shape)
         else:
             for i, layer in enumerate(self.layers):
                 out = layer(
                     out,
                     (cos, sin),
                     cu_seqlens,
+                    B,
                     T,
                     None,
                     indices,
@@ -688,10 +720,10 @@ class FlashTransformerDecoder(nn.Module):
                 attn_mask=mask,
             )
 
-            return out, mask
+        return out, mask
 
 
-class FlashTransformerEncoder(nn.Module):
+class FlashTransformerEncoder(FlashTransformerDecoder):
     def __init__(
         self,
         n_layer,
@@ -711,9 +743,9 @@ class FlashTransformerEncoder(nn.Module):
         n_query_groups=None,
         condition_types=[],
         pre_lnorm=True,
+        dtype=None,
     ):
-        super(FlashTransformerDecoder, self).__init__(
-            self,
+        super(FlashTransformerEncoder, self).__init__(
             n_layer,
             n_head,
             d_model,
@@ -728,6 +760,7 @@ class FlashTransformerEncoder(nn.Module):
             n_query_groups=n_query_groups,
             condition_types=condition_types,
             pre_lnorm=pre_lnorm,
+            dtype=dtype,
         )
 
         self.padding_idx = padding_idx
@@ -744,7 +777,7 @@ class FlashTransformerEncoder(nn.Module):
             ),
         }
 
-    def forward(self, input, conditioning=0):
+    def forward(self, input, conditioning=0, subset_mask=None):
         return self._forward(
-            self.word_emb(input), (input != self.padding_idx).unsqueeze(2), conditioning
+            self.word_emb(input), (input != self.padding_idx).unsqueeze(2), conditioning, subset_mask
         )  # (B, L, 1)

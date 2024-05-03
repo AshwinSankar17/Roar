@@ -98,8 +98,9 @@ model:
       drop_last: false
       shuffle: true
       batch_size: 32
-      num_workers: 12
+      num_workers: 16
       pin_memory: true
+      persistent_workers: true
 
   validation_ds:
     dataset:
@@ -130,8 +131,9 @@ model:
       drop_last: false
       shuffle: false
       batch_size: 32
-      num_workers: 8
+      num_workers: 16
       pin_memory: true
+      persistent_workers: true
 
   preprocessor:
     _target_: roar.collections.asr.parts.preprocessing.features.FilterbankFeatures
@@ -156,7 +158,7 @@ model:
     use_grads: false
 
   input_fft: #n_embed and padding_idx are added by the model
-    _target_: roar.collections.tts.modules.transformer.FFTransformerEncoder
+    _target_: roar.collections.tts.modules.transformer.FlashTransformerEncoder
     n_layer: 6
     n_head: 1
     d_model: ${model.symbols_embedding_dim}
@@ -165,12 +167,12 @@ model:
     kernel_size: 3
     dropout: 0.1
     dropatt: 0.1
-    dropemb: 0.0
     d_embed: ${model.symbols_embedding_dim}
+    pre_lnorm: False
     condition_types: [ "add", "layernorm" ] # options: [ "add", "concat", "layernorm" ]
 
   output_fft:
-    _target_: roar.collections.tts.modules.transformer.FFTransformerDecoder
+    _target_: roar.collections.tts.modules.transformer.FlashTransformerDecoder
     n_layer: 6
     n_head: 1
     d_model: ${model.symbols_embedding_dim}
@@ -179,7 +181,7 @@ model:
     kernel_size: 3
     dropout: 0.1
     dropatt: 0.1
-    dropemb: 0.0
+    pre_lnorm: False
     condition_types: [ "add", "layernorm" ] # options: [ "add", "concat", "layernorm" ]
 
   alignment_module:
@@ -234,7 +236,8 @@ model:
 
   optim:
     _target_: torch.optim.AdamW
-    lr: 0.0002
+    lr: 3e-4
+    weight_decay: 1e-2
     betas: [0.8, 0.99]
     fused: true
 

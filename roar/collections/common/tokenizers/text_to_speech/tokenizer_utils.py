@@ -47,7 +47,7 @@ def get_characters_from_range(start_range, end_range):
     characters_in_range = [
         chr(char_code)
         for char_code in range(start_range, end_range + 1)
-        if unicodedata.category(char_code) != "Cn"
+        if unicodedata.category(chr(char_code)) != "Cn"
     ]
     return characters_in_range
 

@@ -1,10 +1,11 @@
 import torch
 
+from roar.collections.tts.modules.transformer import mask_from_lens
 from roar.collections.tts.modules.submodules import (
     ConditionalInput,
     ConditionalLayerNorm,
 )
-from roar.collections.tts.modules.attention import MultiHeadCrossAttn
+# from roar.collections.tts.modules.attention import MultiHeadCrossAttn
 from roar.collections.tts.parts.utils.helpers import (
     binarize_attention_parallel,
     regulate_len,
@@ -93,79 +94,79 @@ class ConvReLUNorm(torch.nn.Module, adapter_mixins.AdapterModuleMixin):
         return out
 
 
-class TemporalPredictor(NeuralModule):
-    """Predicts a single float per each temporal location"""
+# class TemporalPredictor(NeuralModule):
+#     """Predicts a single float per each temporal location"""
 
-    def __init__(
-        self,
-        input_size,
-        filter_size=512,
-        n_attn_heads=8,
-        kernel_size=3,
-        dropout=0.5,
-        n_layers=30,
-        cross_attn_interval=3,
-        pre_ln=False,
-        condition_types=[],
-    ):
-        super(TemporalPredictor, self).__init__()
-        d_head = filter_size // n_attn_heads
-        assert n_attn_heads * d_head == filter_size
-        self.cross_attn_interval = cross_attn_interval
-        self.cond_input = ConditionalInput(input_size, input_size, condition_types)
-        # self.layers = torch.nn.ModuleList()
-        self.conv_layers = torch.nn.ModuleList()
-        self.attn_layers = torch.nn.ModuleList()
-        for i in range(n_layers):
-            self.conv_layers.append(
-                ConvReLUNorm(
-                    input_size if i == 0 else filter_size,
-                    filter_size,
-                    kernel_size=kernel_size,
-                    dropout=dropout,
-                    condition_dim=input_size,
-                    condition_types=condition_types,
-                )
-            )
-            if i % cross_attn_interval == cross_attn_interval - 1:
-                self.attn_layers = MultiHeadCrossAttn(n_attn_heads, filter_size, d_head, 0.2, pre_lnorm=pre_ln)
-        self.fc = torch.nn.Linear(filter_size, 1, bias=True)
+#     def __init__(
+#         self,
+#         input_size,
+#         filter_size=512,
+#         n_attn_heads=8,
+#         kernel_size=3,
+#         dropout=0.5,
+#         n_layers=30,
+#         cross_attn_interval=3,
+#         pre_ln=False,
+#         condition_types=[],
+#     ):
+#         super(TemporalPredictor, self).__init__()
+#         d_head = filter_size // n_attn_heads
+#         assert n_attn_heads * d_head == filter_size
+#         self.cross_attn_interval = cross_attn_interval
+#         self.cond_input = ConditionalInput(input_size, input_size, condition_types)
+#         # self.layers = torch.nn.ModuleList()
+#         self.conv_layers = torch.nn.ModuleList()
+#         self.attn_layers = torch.nn.ModuleList()
+#         for i in range(n_layers):
+#             self.conv_layers.append(
+#                 ConvReLUNorm(
+#                     input_size if i == 0 else filter_size,
+#                     filter_size,
+#                     kernel_size=kernel_size,
+#                     dropout=dropout,
+#                     condition_dim=input_size,
+#                     condition_types=condition_types,
+#                 )
+#             )
+#             if i % cross_attn_interval == cross_attn_interval - 1:
+#                 self.attn_layers = MultiHeadCrossAttn(n_attn_heads, filter_size, d_head, 0.2, pre_lnorm=pre_ln)
+#         self.fc = torch.nn.Linear(filter_size, 1, bias=True)
 
-        # Use for adapter input dimension
-        self.filter_size = filter_size
+#         # Use for adapter input dimension
+#         self.filter_size = filter_size
 
-    @property
-    def input_types(self):
-        return {
-            "enc": NeuralType(("B", "T", "D"), EncodedRepresentation()),
-            "enc_mask": NeuralType(("B", "T", 1), TokenDurationType()),
-            "conditioning": NeuralType(
-                ("B", "T", "D"), EncodedRepresentation(), optional=True
-            ),
-        }
+#     @property
+#     def input_types(self):
+#         return {
+#             "enc": NeuralType(("B", "T", "D"), EncodedRepresentation()),
+#             "enc_mask": NeuralType(("B", "T", 1), TokenDurationType()),
+#             "conditioning": NeuralType(
+#                 ("B", "T", "D"), EncodedRepresentation(), optional=True
+#             ),
+#         }
 
-    @property
-    def output_types(self):
-        return {
-            "out": NeuralType(("B", "T"), EncodedRepresentation()),
-        }
+#     @property
+#     def output_types(self):
+#         return {
+#             "out": NeuralType(("B", "T"), EncodedRepresentation()),
+#         }
 
-    def forward(self, enc, enc_mask, conditioning=None):
-        enc = self.cond_input(enc, conditioning)
-        out = enc * enc_mask
-        out = out.transpose(1, 2)
-        idx = 0
-        for i, layer in enumerate(self.conv_layers):
-            out = layer(out, conditioning=conditioning)
-            if i % self.cross_attn_interval == self.cross_attn_interval - 1:
-                out = out.transpose(1, 2)
-                out = self.attn_layers[idx](out, conditioning=conditioning)
-                out = out.transpose(1, 2)
-                idx+=1
+#     def forward(self, enc, enc_mask, conditioning=None):
+#         enc = self.cond_input(enc, conditioning)
+#         out = enc * enc_mask
+#         out = out.transpose(1, 2)
+#         idx = 0
+#         for i, layer in enumerate(self.conv_layers):
+#             out = layer(out, conditioning=conditioning)
+#             if i % self.cross_attn_interval == self.cross_attn_interval - 1:
+#                 out = out.transpose(1, 2)
+#                 out = self.attn_layers[idx](out, conditioning=conditioning)
+#                 out = out.transpose(1, 2)
+#                 idx+=1
                 
-        out = out.transpose(1, 2)
-        out = self.fc(out) * enc_mask
-        return out.squeeze(-1)
+#         out = out.transpose(1, 2)
+#         out = self.fc(out) * enc_mask
+#         return out.squeeze(-1)
 
 
 class SpeechPromptEncoder(NeuralModule):
@@ -364,46 +365,46 @@ class JETSModule(NeuralModule, adapter_mixins.AdapterModuleMixin):
             )
             attn_hard = binarize_attention_parallel(attn_soft, input_lens, mel_lens)
             attn_hard_dur = attn_hard.sum(2)[:, 0, :]
-
+            
         # Predict pitch
-        pitch_predicted = self.pitch_predictor(enc_out, enc_mask, conditioning=spk_emb)
-        if pitch is not None:
-            if self.learn_alignment and pitch.shape[-1] != pitch_predicted.shape[-1]:
-                # Pitch during training is per spectrogram frame, but during inference, it should be per character
-                pitch = average_features(pitch.unsqueeze(1), attn_hard_dur).squeeze(1)
-            elif not self.learn_alignment:
-                # If alignment is not learnt attn_hard_dur is None, hence durs_predicted
-                pitch = average_features(pitch.unsqueeze(1), durs_predicted).squeeze(1)
-            pitch_emb = self.pitch_emb(pitch.unsqueeze(1))
-        else:
-            pitch_emb = self.pitch_emb(pitch_predicted.unsqueeze(1))
+        # pitch_predicted = self.pitch_predictor(enc_out, enc_mask, conditioning=spk_emb)
+        # if pitch is not None:
+        #     if self.learn_alignment and pitch.shape[-1] != pitch_predicted.shape[-1]:
+        #         # Pitch during training is per spectrogram frame, but during inference, it should be per character
+        #         pitch = average_features(pitch.unsqueeze(1), attn_hard_dur).squeeze(1)
+        #     elif not self.learn_alignment:
+        #         # If alignment is not learnt attn_hard_dur is None, hence durs_predicted
+        #         pitch = average_features(pitch.unsqueeze(1), durs_predicted).squeeze(1)
+        #     pitch_emb = self.pitch_emb(pitch.unsqueeze(1))
+        # else:
+        #     pitch_emb = self.pitch_emb(pitch_predicted.unsqueeze(1))
 
-        enc_out = enc_out + pitch_emb.transpose(1, 2)
+        # enc_out = enc_out + pitch_emb.transpose(1, 2)
 
         # Predict energy
-        if self.energy_predictor is not None:
-            energy_pred = self.energy_predictor(
-                enc_out, enc_mask, conditioning=spk_emb
-            ).squeeze(-1)
+        # if self.energy_predictor is not None:
+        #     energy_pred = self.energy_predictor(
+        #         enc_out, enc_mask, conditioning=spk_emb
+        #     ).squeeze(-1)
 
-            if energy is not None:
-                # Average energy over characters
-                if self.learn_alignment:
-                    energy_tgt = average_features(energy.unsqueeze(1), attn_hard_dur)
-                else:
-                    energy_tgt = average_features(energy.unsqueeze(1), durs_predicted)
-                if self.use_log_energy:
-                    energy_tgt = torch.log(1.0 + energy_tgt)
-                energy_emb = self.energy_emb(energy_tgt)
-                energy_tgt = energy_tgt.squeeze(1)
-            else:
-                energy_emb = self.energy_emb(energy_pred.unsqueeze(1))
-                energy_tgt = None
+        #     if energy is not None:
+        #         # Average energy over characters
+        #         if self.learn_alignment:
+        #             energy_tgt = average_features(energy.unsqueeze(1), attn_hard_dur)
+        #         else:
+        #             energy_tgt = average_features(energy.unsqueeze(1), durs_predicted)
+        #         if self.use_log_energy:
+        #             energy_tgt = torch.log(1.0 + energy_tgt)
+        #         energy_emb = self.energy_emb(energy_tgt)
+        #         energy_tgt = energy_tgt.squeeze(1)
+        #     else:
+        #         energy_emb = self.energy_emb(energy_pred.unsqueeze(1))
+        #         energy_tgt = None
 
-            enc_out = enc_out + energy_emb.transpose(1, 2)
-        else:
-            energy_pred = None
-            energy_tgt = None
+        #     enc_out = enc_out + energy_emb.transpose(1, 2)
+        # else:
+        #     energy_pred = None
+        #     energy_tgt = None
 
         if self.learn_alignment and spec is not None:
             len_regulated, dec_lens = regulate_len(attn_hard_dur, enc_out, pace)
@@ -416,6 +417,35 @@ class JETSModule(NeuralModule, adapter_mixins.AdapterModuleMixin):
             raise ValueError(
                 f"Something unexpected happened when 'spec' is not None and 'self.learn_alignment' is False."
             )
+            
+        reg_mask = mask_from_lens(dec_lens).unsqueeze(2)
+        pitch_predicted = self.pitch_predictor(len_regulated, reg_mask, conditioning=spk_emb)
+        if pitch is not None:
+            pitch_emb = self.pitch_emb(pitch.unsqueeze(1))
+        else:
+            pitch_emb = self.pitch_emb(pitch_predicted.unsqueeze(1))
+        
+        len_regulated = len_regulated + pitch_emb.transpose(1, 2)
+            
+        if self.energy_predictor is not None:
+            energy_pred = self.energy_predictor(
+                len_regulated, reg_mask, conditioning=spk_emb
+            ).squeeze(-1)
+            
+            if energy is not None:
+                energy_tgt = energy.unsqueeze(1)
+                if self.use_log_energy:
+                    energy_tgt = torch.log(1.0 + energy_tgt)
+                energy_emb = self.energy_emb(energy_tgt)
+                energy_tgt = energy_tgt.squeeze(1)
+            else:
+                energy_emb = self.energy_emb(energy_pred.unqueeze(1))
+                energy_tgt = None
+            
+            len_regulated = len_regulated + energy_emb.transpose(1, 2)
+        else:
+            energy_pred = None
+            energy_tgt = None
 
         # Output FFT
         dec_out, _ = self.decoder(
@@ -479,34 +509,6 @@ class JETSModule(NeuralModule, adapter_mixins.AdapterModuleMixin):
             mask=enc_mask,
         )
 
-        if pitch is not None:
-            assert (
-                pitch.shape[-1] == text.shape[-1]
-            ), f"pitch.shape[-1]: {pitch.shape[-1]} != len(text)"
-            pitch_emb = self.pitch_emb(pitch)
-        else:
-            pitch_pred = self.pitch_predictor(enc_out, enc_mask, conditioning=spk_emb)
-            pitch_emb = self.pitch_emb(pitch_pred.unsqueeze(1))
-
-        # pitch_predicted = (
-        #     self.pitch_predictor(enc_out, enc_mask, conditioning=spk_emb) + pitch
-        # )
-        # pitch_emb = self.pitch_emb(pitch_predicted.unsqueeze(1))
-        enc_out = enc_out + pitch_emb.transpose(1, 2)
-
-        if self.energy_predictor is not None:
-            if energy is not None:
-                assert (
-                    energy.shape[-1] == text.shape[-1]
-                ), f"energy.shape[-1]: {energy.shape[-1]} != len(text)"
-                energy_emb = self.energy_emb(energy)
-            else:
-                energy_pred = self.energy_predictor(
-                    enc_out, enc_mask, conditioning=spk_emb
-                ).squeeze(-1)
-                energy_emb = self.energy_emb(energy_pred.unsqueeze(1))
-            enc_out = enc_out + energy_emb.transpose(1, 2)
-
         # Expand to decoder time dimension
         len_regulated, dec_lens = regulate_len(durs_predicted, enc_out, pace)
         volume_extended = None
@@ -515,6 +517,37 @@ class JETSModule(NeuralModule, adapter_mixins.AdapterModuleMixin):
                 durs_predicted, volume.unsqueeze(-1), pace
             )
             volume_extended = volume_extended.squeeze(-1).float()
+        
+        reg_mask = mask_from_lens(dec_lens).unsqueeze(2)
+            
+        if pitch is not None:
+            assert (
+                pitch.shape[-1] == len_regulated.shape[-1]
+            ), f"pitch.shape[-1]: {pitch.shape[-1]} != len(dec_in)"
+            pitch_emb = self.pitch_emb(pitch)
+        else:
+            pitch_pred = self.pitch_predictor(len_regulated, reg_mask, conditioning=spk_emb)
+            pitch_emb = self.pitch_emb(pitch_pred.unsqueeze(1))
+
+        # pitch_predicted = (
+        #     self.pitch_predictor(enc_out, enc_mask, conditioning=spk_emb) + pitch
+        # )
+        # pitch_emb = self.pitch_emb(pitch_predicted.unsqueeze(1))
+        len_regulated = len_regulated + pitch_emb.transpose(1, 2)
+
+        if self.energy_predictor is not None:
+            if energy is not None:
+                assert (
+                    energy.shape[-1] == len_regulated.shape[-1]
+                ), f"energy.shape[-1]: {energy.shape[-1]} != len(dec_in)"
+                energy_emb = self.energy_emb(energy)
+            else:
+                energy_pred = self.energy_predictor(
+                    len_regulated, reg_mask, conditioning=spk_emb
+                ).squeeze(-1)
+                energy_emb = self.energy_emb(energy_pred.unsqueeze(1))
+            len_regulated = len_regulated + energy_emb.transpose(1, 2)
+
 
         # Output FFT
         dec_out, _ = self.decoder(
