@@ -203,7 +203,7 @@ class IndicCharsTokenizer(BaseCharsTokenizer):
             self.in_unicode_range = lambda x: unicode_range[0] <= x <= unicode_range[1]
             chars = get_characters_from_range(*unicode_range)
         else:
-            self.in_unicode_range = lambda x: False
+            self.in_unicode_range = lambda x: True
             chars = [
                 c
                 for c in chars
@@ -235,7 +235,7 @@ class IndicCharsTokenizer(BaseCharsTokenizer):
             if c == space and len(cs) > 0 and cs[-1] != space:
                 cs.append(c)
 
-            elif (self.in_unicode_range(c) or c == "'" and c in tokens) or c.isdigit():
+            elif ((self.in_unicode_range(c) or c == "'") and c in tokens) or c.isdigit():
                 cs.append(c)
             elif (
                 self.process_mixed_language_chars
