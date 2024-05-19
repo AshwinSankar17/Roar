@@ -336,3 +336,86 @@ class FFTransformer(nn.Module):
 
         out = self.dense(out).transpose(1, 2)
         return out
+
+class StyleAdaptiveTransformerDecoder(NeuralModule):
+    def __init__(
+        self,
+        n_layer,
+        n_head,
+        d_model,
+        d_head,
+        d_inner,
+        kernel_size,
+        dropout,
+        dropatt,
+        dropemb=0.0,
+        pre_lnorm=False,
+        condition_types=[],
+        use_flash=False,
+    ):
+        super(StyleAdaptiveTransformerDecoder, self).__init__()
+        self.d_model = d_model
+        self.n_head = n_head
+        self.d_head = d_head
+
+        self.pos_emb = PositionalEmbedding(self.d_model)
+        self.drop = nn.Dropout(dropemb)
+        self.layers = nn.ModuleList()
+        self.style_adapters = nn.ModuleList()
+        # self.cond_input = ConditionalInput(d_model, d_model, condition_types)
+        for _ in range(n_layer):
+            self.layers.append(
+                TransformerLayer(
+                    n_head,
+                    d_model,
+                    d_head,
+                    d_inner,
+                    kernel_size,
+                    dropout,
+                    dropatt=dropatt,
+                    pre_lnorm=pre_lnorm,
+                    condition_types=condition_types,
+                    use_flash=use_flash,
+                )
+            )
+            self.style_adapters.append(
+                nn.MultiheadAttention(n_head * d_head, n_head, dropout, batch_first=True),
+            )
+
+    @property
+    def input_types(self):
+        return {
+            "input": NeuralType(("B", "T", "D"), EncodedRepresentation()),
+            "seq_lens": NeuralType(("B"), LengthsType()),
+            "conditioning": NeuralType(
+                ("B", "T", "D"), EncodedRepresentation(), optional=True
+            ),
+        }
+
+    @property
+    def output_types(self):
+        return {
+            "out": NeuralType(("B", "T", "D"), EncodedRepresentation()),
+            "mask": NeuralType(("B", "T", "D"), MaskType()),
+        }
+
+    @typecheck()
+    def forward(self, input, seq_lens, conditioning=None):
+        return self._forward(input, mask_from_lens(seq_lens).unsqueeze(2), conditioning)
+
+    def _forward(self, inp, mask, conditioning):
+        pos_seq = torch.arange(inp.size(1), device=inp.device).to(inp.dtype)
+        pos_emb = self.pos_emb(pos_seq) * mask
+        inp += pos_emb
+        # inp = self.cond_input(inp, conditioning)
+        out = self.drop(inp)
+
+        # print("LN 413 -> cond SATFF : ", conditioning.shape)
+        # print("LN 413 -> inp SATFF : ", inp.shape)
+
+        for layer, style_adapter in zip(self.layers, self.style_adapters):
+            conditioning, _ = style_adapter(out, conditioning, conditioning)
+            out = layer(out, mask=mask, conditioning=conditioning)
+
+        # out = self.drop(out)
+        return out, mask

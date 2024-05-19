@@ -55,6 +55,9 @@ class LMTokens(TTSDataType):
 class ReferenceAudio(TTSDataType, WithLens):
     name = "reference_audio"
 
+class CodecLatents(TTSDataType, WithLens):
+    name = "codec_latents"
+
 
 MAIN_DATA_TYPES = [Audio, Text]
 VALID_SUPPLEMENTARY_DATA_TYPES = [
@@ -68,6 +71,7 @@ VALID_SUPPLEMENTARY_DATA_TYPES = [
     Voiced_mask,
     P_voiced,
     ReferenceAudio,
+    CodecLatents,
 ]
 DATA_STR2DATA_CLASS = {
     d.name: d for d in MAIN_DATA_TYPES + VALID_SUPPLEMENTARY_DATA_TYPES

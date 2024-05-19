@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, Union
 
 import librosa
-import penn
 import numpy as np
 import torch
 from einops import rearrange
@@ -45,6 +44,7 @@ from roar.collections.tts.torch.tts_data_types import (
     TTSDataType,
     Voiced_mask,
     WithLens,
+    CodecLatents,
 )
 from roar.core.classes import Dataset
 from roar.utils import logging
@@ -172,6 +172,7 @@ class TTSDataset(Dataset):
 
         # Initialize text tokenizer
         self.text_tokenizer = text_tokenizer
+        # self.audio_tokenizer = CodecPreprocessor("facebook/encodec_24khz")
 
         self.phoneme_probability = None
         if isinstance(self.text_tokenizer, BaseTokenizer):
@@ -483,6 +484,15 @@ class TTSDataset(Dataset):
             with open(Path(pitch_stats_path), "r", encoding="utf-8") as pitch_f:
                 self.pitch_stats = json.load(pitch_f)
 
+    # codec_latents
+    def add_codec_latents(self, **kwargs):
+        self.codec_latents_folder = kwargs.pop("codec_latents_folder", None)
+
+        if self.codec_latents_folder is None:
+            self.codec_latents_folder = Path(self.sup_data_path) / CodecLatents.name
+
+        self.codec_latents_folder.mkdir(exist_ok=True, parents=True)
+
     # saving voiced_mask and p_voiced with pitch
     def add_voiced_mask(self, **kwargs):
         self.voiced_mask_folder = kwargs.pop("voiced_mask_folder", None)
@@ -677,38 +687,21 @@ class TTSDataset(Dataset):
                 align_prior_matrix = torch.from_numpy(
                     beta_binomial_prior_distribution(text_length, mel_len)
                 )
+        
+        if CodecLatents in self.sup_data_types_set:
+            codec_filepath = self.codec_latents_folder / f"{rel_audio_path_as_text_id}.pt"
 
-        # non_exist_voiced_index = []
+            if codec_filepath.exists():
+                codec_latents = torch.load(codec_filepath).float().squeeze(0)
+                codec_length = torch.tensor(codec_latents.size(1)).long()
+            else:
+                raise NotImplementedError(f"Codec Latents does not exist in path: {codec_filepath}. On the fly codec extraction is not implemented")
+                # codec_latents = self.audio_tokenizer.get_latents(audio.unsqueeze(0)).squeeze(0)
+                # torch.save(codec_latents, codec_filepath)
+
+        non_exist_voiced_index = []
         my_var = locals()
-        # for i, voiced_item in enumerate([Pitch, Voiced_mask, P_voiced]):
-        #     if voiced_item in self.sup_data_types_set:
-        #         voiced_folder = getattr(self, f"{voiced_item.name}_folder")
-        #         voiced_filepath = voiced_folder / f"{rel_audio_path_as_text_id}.pt"
-        #         if voiced_filepath.exists():
-        #             my_var.__setitem__(
-        #                 voiced_item.name, torch.load(voiced_filepath).float()
-        #             )
-        #         else:
-        #             non_exist_voiced_index.append(
-        #                 (i, voiced_item.name, voiced_filepath)
-        #             )
-
-        # if len(non_exist_voiced_index) != 0:
-        #     voiced_tuple = librosa.pyin(
-        #         audio.numpy(),
-        #         fmin=self.pitch_fmin,
-        #         fmax=self.pitch_fmax,
-        #         frame_length=self.win_length,
-        #         sr=self.sample_rate,
-        #         fill_na=0.0,
-        #     )
-        #     for i, voiced_name, voiced_filepath in non_exist_voiced_index:
-        #         my_var.__setitem__(
-        #             voiced_name, torch.from_numpy(voiced_tuple[i]).float()
-        #         )
-        #         torch.save(my_var.get(voiced_name), voiced_filepath)
-
-        for i, voiced_item in enumerate([Pitch, P_voiced]):
+        for i, voiced_item in enumerate([Pitch, Voiced_mask, P_voiced]):
             if voiced_item in self.sup_data_types_set:
                 voiced_folder = getattr(self, f"{voiced_item.name}_folder")
                 voiced_filepath = voiced_folder / f"{rel_audio_path_as_text_id}.pt"
@@ -720,14 +713,15 @@ class TTSDataset(Dataset):
                     non_exist_voiced_index.append(
                         (i, voiced_item.name, voiced_filepath)
                     )
+
         if len(non_exist_voiced_index) != 0:
-            voiced_tuple = penn.from_audio(
-                audio,
-                sr=self.sample_rate,
+            voiced_tuple = librosa.pyin(
+                audio.numpy(),
                 fmin=self.pitch_fmin,
                 fmax=self.pitch_fmax,
-                hopsize=self.hop_length / self.sample_rate,
-                center="zero",
+                frame_length=self.win_length,
+                sr=self.sample_rate,
+                fill_na=0.0,
             )
             for i, voiced_name, voiced_filepath in non_exist_voiced_index:
                 my_var.__setitem__(
@@ -737,8 +731,8 @@ class TTSDataset(Dataset):
 
         pitch = my_var.get("pitch", None)
         pitch_length = my_var.get("pitch_length", None)
+        voiced_mask = my_var.get("voiced_mask", None)
         p_voiced = my_var.get("p_voiced", None)
-
         # normalize pitch if requested.
         if pitch is not None:
             pitch_length = torch.tensor(len(pitch)).long()
@@ -813,10 +807,13 @@ class TTSDataset(Dataset):
             energy,
             energy_length,
             speaker_id,
+            voiced_mask,
             p_voiced,
             audio_shifted,
             reference_audio,
             reference_audio_length,
+            codec_latents,
+            codec_length,
         )
 
     def __len__(self):
@@ -847,10 +844,13 @@ class TTSDataset(Dataset):
             energies,
             energies_lengths,
             _,
+            voiced_masks,
             p_voiceds,
             _,
             _,
             reference_audio_lengths,
+            _,
+            codec_latent_lengths,
         ) = zip(*batch)
 
         max_audio_len = max(audio_lengths).item()
@@ -874,6 +874,11 @@ class TTSDataset(Dataset):
             if ReferenceAudio in self.sup_data_types_set
             else None
         )
+        max_codec_latent_len = (
+            max(codec_latent_lengths).item()
+            if CodecLatents in self.sup_data_types_set
+            else None
+        )
 
         if LogMel in self.sup_data_types_set:
             log_mel_pad = torch.finfo(batch[0][4].dtype).tiny
@@ -895,10 +900,13 @@ class TTSDataset(Dataset):
             pitches,
             energies,
             speaker_ids,
+            voiced_masks,
             p_voiceds,
             audios_shifted,
             reference_audios,
+            codec_latents,
         ) = (
+            [],
             [],
             [],
             [],
@@ -927,10 +935,13 @@ class TTSDataset(Dataset):
                 energy,
                 energy_length,
                 speaker_id,
+                voiced_mask,
                 p_voiced,
                 audio_shifted,
                 reference_audio,
                 reference_audios_length,
+                codec_latent,
+                codec_latent_length,
             ) = sample_tuple
 
             audio = general_padding(audio, audio_len.item(), max_audio_len)
@@ -972,10 +983,10 @@ class TTSDataset(Dataset):
                     general_padding(pitch, pitch_length.item(), max_pitches_len)
                 )
 
-            # if Voiced_mask in self.sup_data_types_set:
-            #     voiced_masks.append(
-            #         general_padding(voiced_mask, pitch_length.item(), max_pitches_len)
-            #     )
+            if Voiced_mask in self.sup_data_types_set:
+                voiced_masks.append(
+                    general_padding(voiced_mask, pitch_length.item(), max_pitches_len)
+                )
 
             if P_voiced in self.sup_data_types_set:
                 p_voiceds.append(
@@ -996,6 +1007,15 @@ class TTSDataset(Dataset):
                         reference_audio,
                         reference_audios_length.item(),
                         max_reference_audio_len,
+                    )
+                )
+            
+            if CodecLatents in self.sup_data_types_set:
+                codec_latents.append(
+                    general_padding(
+                        codec_latent,
+                        codec_latent_length.item(),
+                        max_codec_latent_len,
                     )
                 )
 
@@ -1029,9 +1049,9 @@ class TTSDataset(Dataset):
             "speaker_id": torch.stack(speaker_ids)
             if SpeakerID in self.sup_data_types_set
             else None,
-            # "voiced_mask": torch.stack(voiced_masks)
-            # if Voiced_mask in self.sup_data_types_set
-            # else None,
+            "voiced_mask": torch.stack(voiced_masks)
+            if Voiced_mask in self.sup_data_types_set
+            else None,
             "p_voiced": torch.stack(p_voiceds)
             if P_voiced in self.sup_data_types_set
             else None,
@@ -1044,14 +1064,21 @@ class TTSDataset(Dataset):
             "reference_audio_lens": torch.stack(reference_audio_lengths)
             if ReferenceAudio in self.sup_data_types_set
             else None,
+            "codec_latent": torch.stack(codec_latents)
+            if CodecLatents in self.sup_data_types_set
+            else None,
+            "codec_latent_lens": torch.stack(codec_latent_lengths)
+            if CodecLatents in self.sup_data_types_set
+            else None,
         }
 
         return data_dict
 
     def _collate_fn(self, batch):
         data_dict = self.general_collate_fn(batch)
-        joined_data = self.join_data(data_dict)
-        return joined_data
+        # joined_data = self.join_data(data_dict)
+        # return joined_data
+        return data_dict
 
 
 class MixerTTSXDataset(TTSDataset):

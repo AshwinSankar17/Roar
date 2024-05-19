@@ -1,0 +1,301 @@
+# This config contains the default values for training FastPitch speaker adaptation
+# If you want to train model on other dataset, you can change config values according to your dataset.
+# Most dataset-specific arguments are in the head of the config file, see below.
+
+name: Rasa/JETS
+
+train_dataset: ???
+validation_datasets: ???
+sup_data_path: ???
+sup_data_types: [ "align_prior_matrix", "pitch", "energy"]
+
+# Default values from librosa.pyin
+pitch_fmin: 65.40639132514966
+pitch_fmax: 2093.004522404789
+
+# these frame-wise values depend on pitch_fmin and pitch_fmax, you can get values
+# by running `scripts/dataset_processing/tts/extract_sup_data.py`
+pitch_mean: ???  # e.g. 212.35873413085938 for LJSpeech
+pitch_std:  ???  # e.g.  68.52806091308594 for LJSpeech
+
+# Default values for dataset with sample_rate=44100
+sample_rate: 24000
+n_mel_channels: 80
+n_window_size: 1024
+n_window_stride: 256
+n_fft: 1024
+lowfreq: 0
+highfreq: 8000
+window: hann
+
+init_from_ptl_ckpt:
+  1:
+    path: /home/tts/ttsteam/repos/Roar/recipes/jets_sp/pilot/indic-tts/JETS-Prompt-FemaleOnly/2024-05-19_01-22-53/checkpoints/indic-tts/last.ckpt
+#     exclude:
+
+model:
+  learn_alignment: true
+  bin_loss_warmup_epochs: 100
+  accumulate_grad_batches: 4
+  
+  max_token_duration: 75
+  symbols_embedding_dim: 384
+  pitch_embedding_kernel_size: 3
+  # energy_embedding_kernel_size: 3
+  segment_size: 64
+    
+  pitch_fmin: ${pitch_fmin}
+  pitch_fmax: ${pitch_fmax}
+
+  pitch_mean: ${pitch_mean}
+  pitch_std: ${pitch_std}
+
+  sample_rate: ${sample_rate}
+  n_mel_channels: ${n_mel_channels}
+  n_window_size: ${n_window_size}
+  n_window_stride: ${n_window_stride}
+  n_fft: ${n_fft}
+  lowfreq: ${lowfreq}
+  highfreq: ${highfreq}
+  window: ${window}
+
+  # Loss scales
+  dur_loss_scale: 1.0 # set to 0.1 to get fastpitch + aligner style
+  pitch_loss_scale: ${model.dur_loss_scale}
+  energy_loss_scale: ${model.dur_loss_scale}
+
+  aligner_loss_scale: 2.0
+  mel_loss_scale: 45.0
+  adversarial_loss_scale: 1.0
+  feature_loss_scale: 2.0
+
+  text_tokenizer:
+    _target_: roar.collections.common.tokenizers.text_to_speech.tts_tokenizers.HindiCharsTokenizer
+    punct: true
+    apostrophe: true
+    pad_with_space: true
+      
+  train_ds:
+    dataset:
+      _target_: roar.collections.tts.data.dataset.TTSDataset
+      manifest_filepath: ${train_dataset}
+      sample_rate: ${model.sample_rate}
+      sup_data_path: ${sup_data_path}
+      sup_data_types: ${sup_data_types}
+      n_fft: ${model.n_fft}
+      win_length: ${model.n_window_size}
+      hop_length: ${model.n_window_stride}
+      window: ${model.window}
+      n_mels: ${model.n_mel_channels}
+      lowfreq: ${model.lowfreq}
+      highfreq: ${model.highfreq}
+      max_duration: null
+      min_duration: 0.1
+      ignore_file: null
+      trim: false
+      pitch_fmin: ${model.pitch_fmin}
+      pitch_fmax: ${model.pitch_fmax}
+      pitch_norm: true
+      pitch_mean: ${model.pitch_mean}
+      pitch_std: ${model.pitch_std}
+      use_beta_binomial_interpolator: true
+      
+    dataloader_params:
+      drop_last: false
+      shuffle: true
+      batch_size: 32
+      num_workers: 12
+      pin_memory: true
+
+  validation_ds:
+    dataset:
+      _target_: roar.collections.tts.data.dataset.TTSDataset
+      manifest_filepath: ${validation_datasets}
+      sample_rate: ${model.sample_rate}
+      sup_data_path: ${sup_data_path}
+      sup_data_types: ${sup_data_types}
+      n_fft: ${model.n_fft}
+      win_length: ${model.n_window_size}
+      hop_length: ${model.n_window_stride}
+      window: ${model.window}
+      n_mels: ${model.n_mel_channels}
+      lowfreq: ${model.lowfreq}
+      highfreq: ${model.highfreq}
+      max_duration: null
+      min_duration: 0.1
+      ignore_file: null
+      trim: false
+      pitch_fmin: ${model.pitch_fmin}
+      pitch_fmax: ${model.pitch_fmax}
+      pitch_norm: true
+      pitch_mean: ${model.pitch_mean}
+      pitch_std: ${model.pitch_std}
+      use_beta_binomial_interpolator: true
+
+    dataloader_params:
+      drop_last: false
+      shuffle: false
+      batch_size: 32
+      num_workers: 8
+      pin_memory: true
+
+  preprocessor:
+    _target_: roar.collections.asr.parts.preprocessing.features.FilterbankFeatures
+    nfilt: ${model.n_mel_channels}
+    lowfreq: ${model.lowfreq}
+    highfreq: ${model.highfreq}
+    n_fft: ${model.n_fft}
+    n_window_size: ${model.n_window_size}
+    n_window_stride: ${model.n_window_stride}
+    pad_to: 0
+    pad_value: -11.52
+    sample_rate: ${model.sample_rate}
+    window: ${model.window}
+    normalize: null
+    preemph: null
+    dither: 0.0
+    frame_splicing: 1
+    log: true
+    log_zero_guard_type: clamp
+    log_zero_guard_value: 1e-05
+    mag_power: 1.0
+    use_grads: false
+
+  input_fft: #n_embed and padding_idx are added by the model
+    _target_: roar.collections.tts.modules.transformer.FFTransformerEncoder
+    n_layer: 6
+    n_head: 6
+    d_model: ${model.symbols_embedding_dim}
+    d_head: 64
+    d_inner: 2048
+    kernel_size: 9
+    dropout: 0.2
+    dropatt: 0.1
+    dropemb: 0.0
+    d_embed: ${model.symbols_embedding_dim}
+    # condition_types: [ "add", "layernorm" ] # options: [ "add", "concat", "layernorm" ]
+
+  output_fft:
+    _target_: roar.collections.tts.modules.transformer.StyleAdaptiveTransformerDecoder
+    n_layer: 6
+    n_head: 6
+    d_model: ${model.symbols_embedding_dim}
+    d_head: 64
+    d_inner: 2048
+    kernel_size: 9
+    dropout: 0.2
+    dropatt: 0.1
+    dropemb: 0.0
+    condition_types: [ "layernorm" ] # options: [ "add", "concat", "layernorm" ]
+
+  alignment_module:
+    _target_: roar.collections.tts.modules.aligner.AlignmentEncoder
+    n_text_channels: ${model.symbols_embedding_dim}
+    condition_types: [ "add" ] # options: [ "add", "concat" ]
+    
+  duration_predictor:
+    _target_: roar.collections.tts.modules.jets_sp.TemporalPredictor
+    input_size: ${model.symbols_embedding_dim}
+    kernel_size: 3
+    n_attn_heads: 6
+    filter_size: ${model.symbols_embedding_dim}
+    dropout: 0.3
+    n_layers: 10
+    cross_attn_interval: 2
+    # condition_types: [ "add", "layernorm" ] # options: [ "add", "concat", "layernorm" ]
+
+  pitch_predictor:
+    _target_: roar.collections.tts.modules.jets_sp.TemporalPredictor
+    input_size: ${model.symbols_embedding_dim}
+    kernel_size: 5
+    n_attn_heads: 6
+    filter_size: ${model.symbols_embedding_dim}
+    dropout: 0.3
+    n_layers: 10
+    cross_attn_interval: 2
+    # condition_types: [ "add", "layernorm" ] # options: [ "add", "concat", "layernorm" ]
+  
+  # energy_predictor:
+  #   _target_: roar.collections.tts.modules.jets_sp.TemporalPredictor
+  #   input_size: ${model.symbols_embedding_dim}
+  #   kernel_size: 5
+  #   filter_size: 512
+  #   dropout: 0.3
+  #   n_layers: 10
+  #   cross_attn_interval: 2
+  #   condition_types: [ "add", "layernorm" ] # options: [ "add", "concat", "layernorm" ]
+
+  prompt_encoder:
+    _target_: roar.collections.tts.modules.jets_sp.PromptEncoder
+    n_mel_channels: ${n_mel_channels}
+    prompt_backbone:
+      _target_: roar.collections.tts.modules.transformer.FFTransformerDecoder
+      n_layer: 6
+      n_head: 6
+      d_model: ${model.symbols_embedding_dim}
+      d_head: 64
+      d_inner: 2048
+      kernel_size: 9
+      dropout: 0.2
+      dropatt: 0.0
+      dropemb: 0.0
+      
+  speaker_encoder:
+    _target_: roar.collections.tts.modules.submodules.SpeakerEncoder
+    precomputed_embedding_dim: null
+    lookup_module:
+      _target_: roar.collections.tts.modules.submodules.SpeakerLookupTable
+      n_speakers: ???
+      embedding_dim: ${model.symbols_embedding_dim}
+
+  waveform_generator:
+    _target_: roar.collections.tts.modules.hifigan_modules.Generator
+    resblock: 1
+    upsample_rates: [8,8,2,2]
+    upsample_kernel_sizes: [16,16,4,4]
+    upsample_initial_channel: 512
+    resblock_kernel_sizes: [3,7,11]
+    resblock_dilation_sizes: [[1,3,5], [1,3,5], [1,3,5]]
+    initial_input_size: ${model.symbols_embedding_dim}
+
+  # optim:
+  #   _target_: torch.optim.AdamW
+  #   lr: 0.0002
+  #   betas: [0.8, 0.99]
+  #   fused: true
+  optim:
+    _target_: apex.optimizers.FusedAdam
+    lr: 0.0002
+    betas: [0.8, 0.99]
+    weight_decay: 1e-2
+
+    sched:
+      name: CosineAnnealing
+      min_lr: 1e-5
+      warmup_ratio: 0.02 
+      
+  max_epochs: 5000
+
+trainer:
+  num_nodes: 1
+  devices: -1
+  accelerator: gpu
+  strategy: ddp_find_unused_parameters_true
+  precision: 'bf16-mixed'
+  max_epochs: ${model.max_epochs}
+  accumulate_grad_batches: 1
+  enable_checkpointing: false # Provided by exp_manager
+  logger: false # Provided by exp_manager
+  log_every_n_steps: 100
+  check_val_every_n_epoch: 1
+  benchmark: false
+
+exp_manager:
+  exp_dir: null
+  name: ${name}
+  create_tensorboard_logger: true
+  create_checkpoint_callback: true
+  checkpoint_callback_params:
+    monitor: val/loss
+  resume_if_exists: false
+  resume_ignore_no_checkpoint: false
