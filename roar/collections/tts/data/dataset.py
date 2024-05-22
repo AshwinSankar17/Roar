@@ -578,11 +578,12 @@ class TTSDataset(Dataset):
         sample = self.data[index]
 
         # Let's keep audio name and all internal directories in rel_audio_path_as_text_id to avoid any collisions
-        rel_audio_path = (
-            Path(sample["audio_filepath"])
-            .relative_to(self.base_data_dir)
-            .with_suffix("")
-        )
+        # rel_audio_path = (
+        #     Path(sample["audio_filepath"])
+        #     .relative_to(self.base_data_dir)
+        #     .with_suffix("")
+        # )
+        rel_audio_path = sample['audio_filepath'].split('/')[-1].replace('.wav','')
         rel_audio_path_as_text_id = str(rel_audio_path).replace("/", "_")
 
         if (
@@ -676,7 +677,6 @@ class TTSDataset(Dataset):
                 align_prior_matrix = torch.from_numpy(
                     beta_binomial_prior_distribution(text_length, mel_len)
                 )
-
         non_exist_voiced_index = []
         my_var = locals()
         for i, voiced_item in enumerate([Pitch, Voiced_mask, P_voiced]):
@@ -691,7 +691,6 @@ class TTSDataset(Dataset):
                     non_exist_voiced_index.append(
                         (i, voiced_item.name, voiced_filepath)
                     )
-
         if len(non_exist_voiced_index) != 0:
             voiced_tuple = librosa.pyin(
                 audio.numpy(),

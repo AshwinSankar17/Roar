@@ -690,7 +690,9 @@ def slice_segments(x, ids_str, segment_size=4):
     Time-wise slicing (patching) of batches for audio/spectrogram
     [B x C x T] -> [B x C x segment_size]
     """
-    ret = torch.zeros_like(x[:, :, :segment_size])
+    # ret = torch.zeros_like(x[:, :, :segment_size])
+    b, c, t = x.size()
+    ret = x.new_zeros(b, c, segment_size)
     for i in range(x.size(0)):
         idx_str = ids_str[i]
         idx_end = idx_str + segment_size
@@ -698,6 +700,7 @@ def slice_segments(x, ids_str, segment_size=4):
         if idx_end >= x.size(2):
             # pad the sample if it is shorter than the segment size
             x_i = torch.nn.functional.pad(x_i, (0, (idx_end + 1) - x.size(2)))
+        # print("LN 701", ret.shape, x_i[:, idx_str:idx_end].shape)
         ret[i] = x_i[:, idx_str:idx_end]
     return ret
 

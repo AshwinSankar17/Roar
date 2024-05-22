@@ -28,6 +28,9 @@ lowfreq: 0
 highfreq: 8000
 window: hann
 
+
+init_from_ptl_ckpt: "/home/tts/ttsteam/repos/Roar/recipes/jets_prompt/ta/pilot/indic-tts/JETS-Prompt-Ta-CrossSpeakerEmotion/2024-05-20_16-33-12/checkpoints/indic-tts/JETS-Prompt-Ta-CrossSpeakerEmotion--val/loss=0.7592-epoch=759.ckpt"
+
 model:
   learn_alignment: true
   bin_loss_warmup_epochs: 100
@@ -54,11 +57,12 @@ model:
   window: ${window}
 
   # Loss scales
-  dur_loss_scale: 1.0 # set to 0.1 to get fastpitch + aligner style
+  # dur_loss_scale: 1.0 # set to 0.1 to get fastpitch + aligner style
+  dur_loss_scale: .1 # set to 0.1 to get fastpitch + aligner style
   pitch_loss_scale: ${model.dur_loss_scale}
   energy_loss_scale: ${model.dur_loss_scale}
 
-  aligner_loss_scale: 2.0
+  aligner_loss_scale: 4.0
   mel_loss_scale: 45.0
   adversarial_loss_scale: 1.0
   feature_loss_scale: 2.0
@@ -253,15 +257,20 @@ model:
     initial_input_size: ${model.symbols_embedding_dim}
 
   optim:
-    _target_: torch.optim.AdamW
-    lr: 0.0002
+    _target_: apex.optimizers.FusedAdam
+    lr: 1e-2
     betas: [0.8, 0.99]
-    fused: true
+    weight_decay: 1e-4
+    # fused: true
 
     sched:
-      name: CosineAnnealing
-      min_lr: 1e-5
-      warmup_ratio: 0.02 
+      # name: CosineAnnealing
+      min_lr: 5e-6
+      # warmup_rati: 0.02 
+      name: NoamAnnealing 
+      warmup_steps: 10000 
+      last_epoch: -1
+      d_model: 1
       
   max_epochs: 5000
 

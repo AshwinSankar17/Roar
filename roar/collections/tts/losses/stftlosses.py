@@ -168,7 +168,7 @@ class STFTLoss(Loss):
 class MultiResolutionSTFTLoss(Loss):
     """Multi resolution STFT loss module."""
 
-    def __init__(self, fft_sizes, hop_sizes, win_lengths, window="hann_window"):
+    def __init__(self, resolutions, window="hann_window"):
         """Initialize Multi resolution STFT loss module.
         Args:
             fft_sizes (list): List of FFT sizes.
@@ -177,9 +177,9 @@ class MultiResolutionSTFTLoss(Loss):
             window (str): Window function type.
         """
         super(MultiResolutionSTFTLoss, self).__init__()
-        assert len(fft_sizes) == len(hop_sizes) == len(win_lengths)
+        # assert len(fft_sizes) == len(hop_sizes) == len(win_lengths)
         self.stft_losses = torch.nn.ModuleList()
-        for fs, ss, wl in zip(fft_sizes, hop_sizes, win_lengths):
+        for fs, ss, wl in resolutions:
             self.stft_losses += [STFTLoss(fs, ss, wl, window)]
 
     @property
@@ -216,3 +216,56 @@ class MultiResolutionSTFTLoss(Loss):
             mag_loss[i] = mag_l
 
         return sc_loss, mag_loss
+
+
+# class MultiResolutionSTFTLoss(Loss):
+#     """Multi resolution STFT loss module."""
+
+#     def __init__(self, fft_sizes, hop_sizes, win_lengths, window="hann_window"):
+#         """Initialize Multi resolution STFT loss module.
+#         Args:
+#             fft_sizes (list): List of FFT sizes.
+#             hop_sizes (list): List of hop sizes.
+#             win_lengths (list): List of window lengths.
+#             window (str): Window function type.
+#         """
+#         super(MultiResolutionSTFTLoss, self).__init__()
+#         assert len(fft_sizes) == len(hop_sizes) == len(win_lengths)
+#         self.stft_losses = torch.nn.ModuleList()
+#         for fs, ss, wl in zip(fft_sizes, hop_sizes, win_lengths):
+#             self.stft_losses += [STFTLoss(fs, ss, wl, window)]
+
+#     @property
+#     def input_types(self):
+#         return {
+#             "x": NeuralType(("B", "T"), AudioSignal()),
+#             "y": NeuralType(("B", "T"), AudioSignal()),
+#             "input_lengths": NeuralType(("B"), LengthsType(), optional=True),
+#         }
+
+#     @property
+#     def output_types(self):
+#         return {
+#             "sc_loss": [NeuralType(elements_type=LossType())],
+#             "mag_loss": [NeuralType(elements_type=LossType())],
+#         }
+
+#     @typecheck()
+#     def forward(self, *, x, y, input_lengths=None):
+#         """Calculate forward propagation.
+#         Args:
+#             x (Tensor): Predicted signal (B, T).
+#             y (Tensor): Groundtruth signal (B, T).
+#             input_lengths (Tensor): Length of groundtruth sample in samples (B).
+#         Returns:
+#             List[Tensor]: Multi resolution spectral convergence loss value.
+#             List[Tensor]: Multi resolution log STFT magnitude loss value.
+#         """
+#         sc_loss = [0.0] * len(self.stft_losses)
+#         mag_loss = [0.0] * len(self.stft_losses)
+#         for i, f in enumerate(self.stft_losses):
+#             sc_l, mag_l = f(x=x, y=y, input_lengths=input_lengths)
+#             sc_loss[i] = sc_l
+#             mag_loss[i] = mag_l
+
+#         return sc_loss, mag_loss

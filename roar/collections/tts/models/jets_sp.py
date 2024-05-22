@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import List, Optional
 
 import torch
+import torchaudio
 from hydra.utils import instantiate
 from omegaconf import DictConfig, OmegaConf, open_dict
 from pytorch_lightning import Trainer
@@ -60,6 +61,7 @@ from roar.core.neural_types.elements import (
 )
 from roar.core.neural_types.neural_type import NeuralType
 from roar.utils import logging, model_utils
+from roar.utils.debug_hook import register_debug_hooks
 
 
 @dataclass
@@ -418,12 +420,18 @@ class JETSPromptModel(TextToWaveform, Exportable):
 
         return [optim_g, optim_d], [scheduler_g, scheduler_d]
 
-    def update_lr(self, interval="step"):
+    def update_lr(self, interval="step", sch_type="both"): # allowed values ["generator", "discriminator", "both"]
+        assert sch_type in ["generator", "discriminator", "both"]
         schedulers = self.lr_schedulers()
         if schedulers is not None and self.lr_schedule_interval == interval:
             sch1, sch2 = schedulers
-            sch1.step()
-            sch2.step()
+            if sch_type == "generator":
+                sch1.step()
+            elif sch_type == "discriminator":
+                sch2.step()
+            else:
+                sch1.step()
+                sch2.step()
 
     @typecheck(
         input_types={
@@ -545,16 +553,17 @@ class JETSPromptModel(TextToWaveform, Exportable):
         
 
         # get ref_spec
+        ref_seg_size = torch.randint(282, 657, (1,)).item()
         reference_spec, reference_spec_len = None, None
-        reference_spec, _ = rand_slice_segments(mels, spec_len, segment_size=283)
-        reference_spec_len = torch.tensor([283]*reference_spec.size(0)).long().to(reference_spec.device)
+        reference_spec, _ = rand_slice_segments(mels, spec_len, segment_size=ref_seg_size)
+        reference_spec_len = torch.tensor([ref_seg_size]*reference_spec.size(0)).long().to(reference_spec.device)
         
         # if reference_audio is not None:
         #     re
         #     reference_spec, reference_spec_len = self.preprocessor(
         #         reference_audio, reference_audio_len
         #     )
-
+        metrics = {}
 
         optim_g, optim_d = self.optimizers()
 
@@ -596,6 +605,7 @@ class JETSPromptModel(TextToWaveform, Exportable):
         )
 
         # Train Discriminator
+        audio_ = audio_ + (1 / 32768) * torch.randn_like(audio_) # noise augment
         mpd_score_real, mpd_score_gen, _, _ = self.mpd(
             y=audio_, y_hat=wavs_pred.detach()
         )
@@ -612,142 +622,147 @@ class JETSPromptModel(TextToWaveform, Exportable):
         self.manual_backward(loss_d / self.accumulate_grad_batches)
         
 
-        if self.accumulate_grad_batches % (batch_idx + 1) == 0:
+        if (batch_idx + 1) % self.accumulate_grad_batches == 0:
             self.clip_gradients(optim_d, gradient_clip_val=1000, gradient_clip_algorithm="norm")
             optim_d.step()
             optim_d.zero_grad()
+            self.update_lr(sch_type="discriminator")
 
         # Train Generator
-        mels_y, _ = self.preprocessor(  # get mel spectrogram for the audio segment
-            audio_.squeeze(1),
-            audio_lens,
-        )
-        mels_pred, _ = self.preprocessor(  # get mel spectrogram for predicted audio
-            wavs_pred.squeeze(1),
-            audio_lens,
-        )
-
-        mel_loss = (
-            self.mel_loss_fn(spect_predicted=mels_pred, spect_tgt=mels_y)
-        )
-        # mel_loss = torch.nn.functional.l1_loss(mels_pred, mels_y) * self.mel_loss_scale
-        dur_loss = self.duration_loss_fn(
-            log_durs_predicted=log_durs_pred, durs_tgt=durs, len=text_lens
-        )
-        loss = mel_loss * self.mel_loss_scale
-        if self.learn_alignment:
-            ctc_loss = self.forward_sum_loss_fn(
-                attn_logprob=attn_logprob, in_lens=text_lens, out_lens=spec_len
+        if (batch_idx + 1) % 5 == 0:  #TODO: Paramterize later
+            mels_y, _ = self.preprocessor(  # get mel spectrogram for the audio segment
+                audio_.squeeze(1),
+                audio_lens,
             )
-            bin_loss_weight = (
-                min(self.current_epoch / self.bin_loss_warmup_epochs, 1.0) * 1.0
+            mels_pred, _ = self.preprocessor(  # get mel spectrogram for predicted audio
+                wavs_pred.squeeze(1),
+                audio_lens,
             )
-            bin_loss = (
-                self.bin_loss_fn(hard_attention=attn_hard, soft_attention=attn_soft)
-                * bin_loss_weight
+
+            mel_loss = (
+                self.mel_loss_fn(spect_predicted=mels_pred, spect_tgt=mels_y)
             )
-            loss += ctc_loss + bin_loss
-
-        pitch_loss = self.pitch_loss_fn(
-            pitch_predicted=pitch_pred, pitch_tgt=pitch, len=text_lens
-        )
-        energy_loss = self.energy_loss_fn(
-            energy_predicted=energy_pred, energy_tgt=energy_tgt, length=text_lens
-        )
-        var_loss = pitch_loss + energy_loss + dur_loss  # variance predictors loss
-        loss += var_loss
-        
-        _, mpd_score_gen, fmap_mpd_real, fmap_mpd_gen = self.mpd(
-            y=audio_, y_hat=wavs_pred
-        )
-        _, msd_score_gen, fmap_msd_real, fmap_msd_gen = self.msd(
-            y=audio_, y_hat=wavs_pred
-        )
-        loss_fm_mpd = (
-            self.feature_loss(fmap_r=fmap_mpd_real, fmap_g=fmap_mpd_gen)
-            * self.feature_loss_scale
-        )
-        loss_fm_msd = (
-            self.feature_loss(fmap_r=fmap_msd_real, fmap_g=fmap_msd_gen)
-            * self.feature_loss_scale
-        )
-        loss_gen_mpd, _ = self.generator_loss(disc_outputs=mpd_score_gen)
-        loss_gen_msd, _ = self.generator_loss(disc_outputs=msd_score_gen)
-        loss_gen_mpd = loss_gen_mpd * self.adversarial_loss_scale
-        loss_gen_msd = loss_gen_msd * self.adversarial_loss_scale
-        loss_g = (loss_gen_msd + loss_gen_mpd) + (loss_fm_msd + loss_fm_mpd) + loss
-        self.manual_backward(loss_g / self.accumulate_grad_batches)
-
-
-        if (batch_idx + 1) % self.accumulate_grad_batches == 0:
-            self.clip_gradients(optim_g, gradient_clip_val=1000, gradient_clip_algorithm="norm")
-            optim_g.step()
-            optim_g.zero_grad()
-            self.update_lr()
-
-        self.log("train/loss", loss)
-        self.log("train/mel_loss", mel_loss)
-        self.log("train/dur_loss", dur_loss)
-        self.log("train/pitch_loss", pitch_loss)
-        if energy_tgt is not None:
-            self.log("train/energy_loss", energy_loss)
-        if self.learn_alignment:
-            self.log("train/ctc_loss", ctc_loss)
-            self.log("train/bin_loss", bin_loss)
-
-        # Log images to tensorboard
-        if (
-            self.log_images
-            and self.log_train_images
-            and isinstance(self.logger, TensorBoardLogger)
-        ):
-            self.log_train_images = False
-
-            self.tb_logger.add_image(
-                "train_mel_target",
-                plot_spectrogram_to_numpy(mels[0].data.cpu().float().numpy()),
-                self.global_step,
-                dataformats="HWC",
+            # mel_loss = torch.nn.functional.l1_loss(mels_pred, mels_y) * self.mel_loss_scale
+            dur_loss = self.duration_loss_fn(
+                log_durs_predicted=log_durs_pred, durs_tgt=durs, len=text_lens
             )
-            spec_predict = mels_pred[0].data.cpu().float().numpy()
-            self.tb_logger.add_image(
-                "train_mel_predicted",
-                plot_spectrogram_to_numpy(spec_predict),
-                self.global_step,
-                dataformats="HWC",
-            )
+            loss = mel_loss * self.mel_loss_scale
             if self.learn_alignment:
-                attn = attn_hard[0].data.cpu().float().numpy().squeeze()
-                self.tb_logger.add_image(
-                    "train_attn",
-                    plot_alignment_to_numpy(attn.T),
-                    self.global_step,
-                    dataformats="HWC",
+                ctc_loss = self.forward_sum_loss_fn(
+                    attn_logprob=attn_logprob, in_lens=text_lens, out_lens=spec_len
                 )
-                soft_attn = attn_soft[0].data.cpu().float().numpy().squeeze()
-                self.tb_logger.add_image(
-                    "train_soft_attn",
-                    plot_alignment_to_numpy(soft_attn.T),
-                    self.global_step,
-                    dataformats="HWC",
+                bin_loss_weight = (
+                    min(self.current_epoch / self.bin_loss_warmup_epochs, 1.0) * 1.0
                 )
+                bin_loss = (
+                    self.bin_loss_fn(hard_attention=attn_hard, soft_attention=attn_soft)
+                    * bin_loss_weight
+                )
+                loss += ctc_loss + bin_loss
 
+            pitch_loss = self.pitch_loss_fn(
+                pitch_predicted=pitch_pred, pitch_tgt=pitch, len=text_lens
+            )
+            energy_loss = self.energy_loss_fn(
+                energy_predicted=energy_pred, energy_tgt=energy_tgt, length=text_lens
+            )
+            var_loss = pitch_loss + energy_loss + dur_loss  # variance predictors loss
+            loss += var_loss
+            
+            _, mpd_score_gen, fmap_mpd_real, fmap_mpd_gen = self.mpd(
+                y=audio_, y_hat=wavs_pred
+            )
+            _, msd_score_gen, fmap_msd_real, fmap_msd_gen = self.msd(
+                y=audio_, y_hat=wavs_pred
+            )
+            loss_fm_mpd = (
+                self.feature_loss(fmap_r=fmap_mpd_real, fmap_g=fmap_mpd_gen)
+                * self.feature_loss_scale
+            )
+            loss_fm_msd = (
+                self.feature_loss(fmap_r=fmap_msd_real, fmap_g=fmap_msd_gen)
+                * self.feature_loss_scale
+            )
+            loss_gen_mpd, _ = self.generator_loss(disc_outputs=mpd_score_gen)
+            loss_gen_msd, _ = self.generator_loss(disc_outputs=msd_score_gen)
+            loss_gen_mpd = loss_gen_mpd * self.adversarial_loss_scale
+            loss_gen_msd = loss_gen_msd * self.adversarial_loss_scale
+            loss_g = (loss_gen_msd + loss_gen_mpd) + (loss_fm_msd + loss_fm_mpd) + loss
+            self.manual_backward(loss_g / self.accumulate_grad_batches)
+
+
+            if (batch_idx + 1) % self.accumulate_grad_batches == 0:
+                self.clip_gradients(optim_g, gradient_clip_val=1000, gradient_clip_algorithm="norm")
+                optim_g.step()
+                optim_g.zero_grad()
+                self.update_lr(sch_type="generator")
+
+            self.log("train/loss", loss)
+            self.log("train/mel_loss", mel_loss)
+            self.log("train/dur_loss", dur_loss)
+            self.log("train/pitch_loss", pitch_loss)
+            if energy_tgt is not None:
+                self.log("train/energy_loss", energy_loss)
+            if self.learn_alignment:
+                self.log("train/ctc_loss", ctc_loss)
+                self.log("train/bin_loss", bin_loss)
+
+            # Log images to tensorboard
+            if (
+                self.log_images
+                and self.log_train_images
+                and isinstance(self.logger, TensorBoardLogger)
+            ):
+                self.log_train_images = False
+
+                self.tb_logger.add_image(
+                    "train_mel_target",
+                    plot_spectrogram_to_numpy(mels[0].data.cpu().float().numpy()),
+                    self.global_step,
+                    dataformats="HWC",
+                )
+                spec_predict = mels_pred[0].data.cpu().float().numpy()
+                self.tb_logger.add_image(
+                    "train_mel_predicted",
+                    plot_spectrogram_to_numpy(spec_predict),
+                    self.global_step,
+                    dataformats="HWC",
+                )
+                if self.learn_alignment:
+                    attn = attn_hard[0].data.cpu().float().numpy().squeeze()
+                    self.tb_logger.add_image(
+                        "train_attn",
+                        plot_alignment_to_numpy(attn.T),
+                        self.global_step,
+                        dataformats="HWC",
+                    )
+                    soft_attn = attn_soft[0].data.cpu().float().numpy().squeeze()
+                    self.tb_logger.add_image(
+                        "train_soft_attn",
+                        plot_alignment_to_numpy(soft_attn.T),
+                        self.global_step,
+                        dataformats="HWC",
+                    )
+
+            metrics = {
+                "train/g_loss_fm_mpd": loss_fm_mpd,
+                "train/g_loss_fm_msd": loss_fm_msd,
+                "train/g_loss_gen_mpd": loss_gen_mpd,
+                "train/g_loss_gen_msd": loss_gen_msd,
+                "train/g_loss": loss_g,
+                "train/g_lr": optim_g.param_groups[0]["lr"],
+            }
+            # self.log_dict(metrics, on_step=True, sync_dist=True)
+        
         metrics = {
-            "train/g_loss_fm_mpd": loss_fm_mpd,
-            "train/g_loss_fm_msd": loss_fm_msd,
-            "train/g_loss_gen_mpd": loss_gen_mpd,
-            "train/g_loss_gen_msd": loss_gen_msd,
-            "train/g_loss": loss_g,
             "train/d_loss_mpd": loss_disc_mpd,
             "train/d_loss_msd": loss_disc_msd,
             "train/d_loss": loss_d,
             "train/global_step": self.global_step,
-            "train/g_lr": optim_g.param_groups[0]["lr"],
+            "train/d_lr": optim_d.param_groups[0]["lr"],
+            **metrics,
         }
         self.log_dict(metrics, on_step=True, sync_dist=True)
-        self.log(
-            "train/g_l1_loss", mel_loss, prog_bar=True, logger=False, sync_dist=True
-        )
 
     def on_train_epoch_end(self) -> None:
         self.update_lr("epoch")
@@ -865,6 +880,11 @@ class JETSPromptModel(TextToWaveform, Exportable):
             "mel_pred": mels_pred if batch_idx == 0 else None,
         }
         self.validation_step_outputs.append(val_outputs)
+
+        # save audios
+        audio_sample = wavs_pred[0].detach().cpu()
+        torchaudio.save('/home/tts/ttsteam/repos/Roar/current_run/0.wav', audio_sample.to(torch.float32), 24000)
+
         return val_outputs
 
     def on_validation_epoch_end(self):

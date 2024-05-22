@@ -544,7 +544,7 @@ class JETSModule(NeuralModule, adapter_mixins.AdapterModuleMixin):
 
         # Output FFT
         dec_out, _ = self.decoder(
-            input=len_regulated, seq_lens=dec_lens, conditioning=spk_emb
+            input=len_regulated, seq_lens=dec_lens, conditioning=prompt_emb
         )
         # spect = self.proj(dec_out).transpose(1, 2)
         wav = self.waveform_generator(x=dec_out.transpose(1, 2))
