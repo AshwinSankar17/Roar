@@ -23,7 +23,7 @@ from roar.collections.tts.torch.tts_data_types import SpeakerID
 from roar.core.classes.common import PretrainedModelInfo, typecheck
 from roar.core.neural_types.elements import AudioSignal, FloatType, Index, IntType, TokenIndex
 from roar.core.neural_types.neural_type import NeuralType
-from roar.core.optim.lr_scheduler import CosineAnnealing
+from roar.core.optim.lr_schedulers import CosineAnnealing
 from roar.utils import logging, model_utils
 from roar.utils.decorators.experimental import experimental
 
@@ -197,11 +197,16 @@ class VitsModel(TextToWaveform):
         return audio_pred, attn, y_mask, (z, z_p, m_p, logs_p)
 
     def training_step(self, batch, batch_idx):
-        speakers = None
-        if SpeakerID in self._train_dl.dataset.sup_data_types_set:
-            (audio, audio_len, text, text_len, speakers) = batch
-        else:
-            (audio, audio_len, text, text_len) = batch
+        # speakers = None
+        # if SpeakerID in self._train_dl.dataset.sup_data_types_set:
+        #     # (audio, audio_len, text, text_len, speakers) = batch
+        # else:
+        #     (audio, audio_len, text, text_len) = batch
+        audio = batch.get("audio")
+        audio_len = batch.get("audio_lens")
+        text = batch.get("text")
+        text_len = batch.get("text_lens")
+        speakers = batch.get("speaker_id", None)
 
         spec, spec_lengths = self.audio_to_melspec_processor(audio, audio_len, linear_spec=True)
 
@@ -287,11 +292,17 @@ class VitsModel(TextToWaveform):
         self.log_dict(metrics, on_step=True, sync_dist=True)
 
     def validation_step(self, batch, batch_idx):
-        speakers = None
-        if self.cfg.n_speakers > 1:
-            (audio, audio_len, text, text_len, speakers) = batch
-        else:
-            (audio, audio_len, text, text_len) = batch
+        # speakers = None
+        # if self.cfg.n_speakers > 1:
+        #     (audio, audio_len, text, text_len, speakers) = batch
+        # else:
+        #     (audio, audio_len, text, text_len) = batch
+
+        audio = batch.get("audio")
+        audio_len = batch.get("audio_lens")
+        text = batch.get("text")
+        text_len = batch.get("text_lens")
+        speakers = batch.get("speaker_id", None)
 
         audio_pred, _, mask, *_ = self.net_g.infer(text, text_len, speakers, max_len=1000)
 
@@ -350,21 +361,21 @@ class VitsModel(TextToWaveform):
             dataset=dataset, collate_fn=dataset.collate_fn, **cfg.dataloader_params,
         )
 
-    def train_dataloader(self):
-        # default used by the Trainer
-        dataset = instantiate(
-            self.cfg.train_ds.dataset,
-            text_normalizer=self.normalizer,
-            text_normalizer_call_kwargs=self.text_normalizer_call_kwargs,
-            text_tokenizer=self.tokenizer,
-        )
+    # def train_dataloader(self):
+    #     # default used by the Trainer
+    #     dataset = instantiate(
+    #         self.cfg.train_ds.dataset,
+    #         text_normalizer=self.normalizer,
+    #         text_normalizer_call_kwargs=self.text_normalizer_call_kwargs,
+    #         text_tokenizer=self.tokenizer,
+    #     )
 
-        train_sampler = DistributedBucketSampler(dataset, **self.cfg.train_ds.batch_sampler)
+    #     train_sampler = DistributedBucketSampler(dataset, **self.cfg.train_ds.batch_sampler)
 
-        dataloader = torch.utils.data.DataLoader(
-            dataset, collate_fn=dataset.collate_fn, batch_sampler=train_sampler, **self.cfg.train_ds.dataloader_params,
-        )
-        return dataloader
+    #     dataloader = torch.utils.data.DataLoader(
+    #         dataset, collate_fn=dataset.collate_fn, batch_sampler=train_sampler, **self.cfg.train_ds.dataloader_params,
+    #     )
+    #     return dataloader
 
     def setup_training_data(self, cfg):
         self._train_dl = self._loader(cfg)
@@ -397,7 +408,10 @@ class VitsModel(TextToWaveform):
         return list_of_models
 
     @typecheck(
-        input_types={"tokens": NeuralType(('B', 'T_text'), TokenIndex(), optional=True),},
+        input_types={
+            "tokens": NeuralType(('B', 'T_text'), TokenIndex(), optional=True),
+            "speakers": NeuralType(('B',), Index(), optional=True),
+        },
         output_types={"audio": NeuralType(('B', 'T_audio'), AudioSignal())},
     )
     def convert_text_to_waveform(self, *, tokens, speakers=None):

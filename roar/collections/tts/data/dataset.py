@@ -1027,8 +1027,8 @@ class TTSDataset(Dataset):
 
     def _collate_fn(self, batch):
         data_dict = self.general_collate_fn(batch)
-        joined_data = self.join_data(data_dict)
-        return joined_data
+        # joined_data = self.join_data(data_dict)
+        return data_dict
 
 
 class MixerTTSXDataset(TTSDataset):

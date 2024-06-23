@@ -3,6 +3,7 @@ from roar.collections.tts.models.aligner import AlignerModel
 # from roar.collections.tts.models.audio_codec import AudioCodecModel
 from roar.collections.tts.models.fastpitch import FastPitchModel
 from roar.collections.tts.models.jets import JETSModel
+from roar.collections.tts.models.vits import VitsModel
 
 # from roar.collections.tts.models.fastpitch_ssl import FastPitchModel_SSL
 from roar.collections.tts.models.hifigan import HifiGanModel
